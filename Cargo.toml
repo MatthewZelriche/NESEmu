@@ -7,7 +7,7 @@ edition = "2021"
 eframe = "0.24.1"
 tock-registers = "0.9.0"
 egui_memory_editor = "0.2.7"
-egui_logger = "0.4.1"
+egui_logger = { path = "vendor/egui_logger" }
 log = "0.4.20"
 arrayvec = "0.7.4"
 bitfield = "0.14.0"

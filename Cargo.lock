@@ -835,8 +835,6 @@ dependencies = [
 [[package]]
 name = "egui_logger"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "503d989b82016134d7f45032f9469adb50ed731c0d67de11f1758ba223a76d07"
 dependencies = [
  "egui",
  "log",
