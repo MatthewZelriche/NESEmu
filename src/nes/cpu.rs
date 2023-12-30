@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use tock_registers::{
     interfaces::{ReadWriteable, Readable},
     register_bitfields,
@@ -63,7 +65,7 @@ impl CPU {
                 // The nestest log requires the cpu register state PRIOR to executing
                 // the instruction, so we copy the current state of the registers
                 // for later, when we print to the log
-                let oldState = self.registers.clone();
+                let old_state = self.registers.clone();
 
                 // Fetch the opcode
                 // Throw a BRK instruction is we can't read the opcode memory location
@@ -74,7 +76,7 @@ impl CPU {
 
                 match self.execute_opcode(opcode, bus) {
                     Ok(instruction) => {
-                        CPU::log_instruction(opcode_addr, &instruction);
+                        CPU::log_instruction(opcode_addr, &instruction, &old_state);
                         self.current_instruction = Some(instruction);
                     }
                     Err(error) => {
@@ -89,8 +91,12 @@ impl CPU {
         }
     }
 
-    pub fn log_instruction(opcode_addr: usize, instruction: &DecodedInstruction) {
-        log::info!("{:X}  {}", opcode_addr, instruction);
+    pub fn log_instruction(
+        opcode_addr: usize,
+        instruction: &DecodedInstruction,
+        old_state: &CPURegisters,
+    ) {
+        log::info!("{:X}  {}     {}", opcode_addr, instruction, old_state);
     }
 }
 
@@ -117,5 +123,19 @@ impl CPURegisters {
             program_counter: reset_vector,
             status_register: InMemoryRegister::new(0x24), // Match nestest
         }
+    }
+}
+
+impl Display for CPURegisters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A: {:02X} X: {:02X} Y: {:02X} P: {:02X} SP: {:02X}",
+            self.accumulator,
+            self.x_reg,
+            self.y_reg,
+            self.status_register.get(),
+            self.stack_ptr
+        )
     }
 }
