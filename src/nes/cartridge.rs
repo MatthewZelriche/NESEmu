@@ -16,7 +16,7 @@ pub struct Cartridge {
     trainer: Option<[u8; 512]>,
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
-    mapper: Box<dyn Mapper>,
+    pub mapper: Box<dyn Mapper>,
 }
 
 impl Cartridge {
@@ -82,6 +82,10 @@ impl Cartridge {
             mapper: get_mapper(mapper_id, prg_rom_size)
                 .map_err(|_| Error::from(ErrorKind::Unsupported))?,
         })
+    }
+
+    pub fn get_prg_rom(&self) -> &[u8] {
+        &self.prg_rom
     }
 }
 

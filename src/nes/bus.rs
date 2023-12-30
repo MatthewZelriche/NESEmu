@@ -26,6 +26,10 @@ impl Bus for BusImpl {
     fn read_byte(&self, address: usize) -> Result<u8, &str> {
         match address {
             (0..=0x1FFF) => Ok(self.system_ram[address % 0x0800]),
+            (0x4020..=0xFFFF) => {
+                let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
+                Ok(self.cartridge.get_prg_rom()[prg_addr])
+            }
             _ => Err("Bad address read on Bus"),
         }
     }
