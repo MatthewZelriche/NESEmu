@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 
 use self::{bus::BusImpl, cpu::CPU, ui::UI};
 
@@ -18,9 +18,11 @@ pub struct NES {
 
 impl NES {
     pub fn new(rom_path: &str) -> Result<Self, Error> {
+        let bus = BusImpl::new(rom_path)?;
+        let cpu = CPU::new(&bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
         Ok(Self {
-            cpu: CPU::default(),
-            bus: BusImpl::new(rom_path)?,
+            cpu,
+            bus,
             ui: UI::new(),
         })
     }

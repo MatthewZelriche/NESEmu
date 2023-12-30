@@ -35,6 +35,15 @@ pub struct CPU {
 }
 
 impl CPU {
+    pub fn new<T: Bus>(bus: &T) -> Result<Self, &'static str> {
+        // Get start program counter
+        let mut buf = [0u8; 2];
+        bus.read_exact(0xFFFC, &mut buf)?;
+        Ok(Self {
+            registers: CPURegisters::new(u16::from_le_bytes(buf) as usize),
+            current_instruction: None,
+        })
+    }
     pub fn reset(&mut self) {
         self.registers.stack_ptr -= 3;
         self.registers
@@ -85,15 +94,6 @@ impl CPU {
     }
 }
 
-impl Default for CPU {
-    fn default() -> Self {
-        Self {
-            registers: CPURegisters::default(),
-            current_instruction: None,
-        }
-    }
-}
-
 impl Clone for CPURegisters {
     fn clone(&self) -> Self {
         Self {
@@ -107,14 +107,14 @@ impl Clone for CPURegisters {
     }
 }
 
-impl Default for CPURegisters {
-    fn default() -> Self {
+impl CPURegisters {
+    pub fn new(reset_vector: usize) -> Self {
         Self {
             accumulator: Default::default(),
             x_reg: Default::default(),
             y_reg: Default::default(),
             stack_ptr: 0xFD,
-            program_counter: Default::default(),
+            program_counter: reset_vector,
             status_register: InMemoryRegister::new(0x24), // Match nestest
         }
     }
