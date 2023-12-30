@@ -105,6 +105,7 @@ impl CPU {
         bus: &mut T,
     ) -> Result<ArrayVec<u8, 3>, &'static str> {
         let addr = self.registers.program_counter;
+        self.registers.program_counter += 1;
         Ok(ArrayVec::from([opcode, bus.read_byte(addr)?, 0x0]))
     }
 
@@ -115,6 +116,7 @@ impl CPU {
     ) -> Result<ArrayVec<u8, 3>, &'static str> {
         let mut byte_sequence = [opcode, 0x0, 0x0];
         let addr = self.registers.program_counter;
+        self.registers.program_counter += 2;
         bus.read_exact(addr, &mut byte_sequence[1..])?;
         Ok(ArrayVec::from(byte_sequence))
     }
