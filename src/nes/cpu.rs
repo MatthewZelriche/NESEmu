@@ -14,7 +14,7 @@ use super::{bus::Bus, instruction::DecodedInstruction};
 
 register_bitfields!(
     u8,
-    Status [
+    pub Status [
         CARRY       OFFSET(0) NUMBITS(1) [],
         ZERO        OFFSET(1) NUMBITS(1) [],
         INT_DISABLE OFFSET(2) NUMBITS(1) [],
