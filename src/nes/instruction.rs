@@ -75,6 +75,16 @@ impl CPU {
         bus: &'a mut T,
     ) -> Result<DecodedInstruction, &'static str> {
         match opcode {
+            0x20 => {
+                let instr =
+                    DecodedInstruction::new(opcode, "JSR", AddressingMode::ABSOLUTE, 6, self, bus)?;
+
+                self.push_stack(&instr.byte_sequence[1..], bus)?;
+                self.registers.program_counter =
+                    CPU::operand_absolute(&instr.byte_sequence) as usize;
+
+                Ok(instr)
+            }
             0x86 => {
                 let instr =
                     DecodedInstruction::new(opcode, "STX", AddressingMode::ZEROPAGE, 3, self, bus)?;

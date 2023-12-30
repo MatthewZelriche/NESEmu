@@ -89,6 +89,15 @@ impl CPU {
             .modify(Status::INT_DISABLE::SET);
     }
 
+    pub fn push_stack<T: Bus>(&mut self, data: &[u8], bus: &mut T) -> Result<(), &'static str> {
+        for byte in data {
+            bus.write_byte(self.registers.stack_ptr, *byte)?;
+            self.registers.stack_ptr -= 1;
+        }
+
+        Ok(())
+    }
+
     pub fn step<T: Bus>(&mut self, bus: &mut T) {
         match self.current_instruction.as_mut() {
             Some(instruction) => {
