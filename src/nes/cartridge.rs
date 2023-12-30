@@ -6,13 +6,17 @@ use std::{
 
 use tock_registers::interfaces::Readable;
 
-use super::ines::{Flags1, INESHeader};
+use super::{
+    ines::{Flags1, Flags2, INESHeader},
+    mappers::{get_mapper, Mapper},
+};
 
 pub struct Cartridge {
     header: INESHeader,
     trainer: Option<[u8; 512]>,
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
+    mapper: Box<dyn Mapper>,
 }
 
 impl Cartridge {
@@ -67,11 +71,16 @@ impl Cartridge {
         );
         file.read_exact(&mut chr_rom)?;
 
+        let prg_rom_size = header.prg_rom_size;
+        let mapper_id = header.flags1.read(Flags1::MAPPER_LOWER)
+            + (header.flags2.read(Flags2::MAPPER_UPPER) << 4);
         Ok(Self {
             header,
             trainer,
             prg_rom,
             chr_rom,
+            mapper: get_mapper(mapper_id, prg_rom_size)
+                .map_err(|_| Error::from(ErrorKind::Unsupported))?,
         })
     }
 }
@@ -84,7 +93,8 @@ mod tests {
 
     #[test]
     fn load_nestest() {
-        let cartridge = Cartridge::new("res/nestest.nes").expect("Failed to construct cartridge");
+        let mut cartridge =
+            Cartridge::new("res/nestest.nes").expect("Failed to construct cartridge");
         // Validate header correct
         assert_eq!(cartridge.header.prg_rom_size, 1);
         assert_eq!(cartridge.header.chr_rom_size, 1);
@@ -102,5 +112,10 @@ mod tests {
         // Check first and last few bytes of prg rom
         assert_eq!(cartridge.prg_rom[..4], [0x4c, 0xF5, 0xC5, 0x60]);
         assert_eq!(*cartridge.prg_rom.last().unwrap(), 0xC5);
+
+        // Validate mapper is working correctly
+        assert_eq!(cartridge.mapper.map_prg_address(0xFFFC).unwrap(), 0x3FFC);
+        assert_eq!(cartridge.mapper.map_prg_address(0xC000).unwrap(), 0x0000);
+        assert_eq!(cartridge.mapper.write_register(0xC000, 0), false);
     }
 }
