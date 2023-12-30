@@ -11,13 +11,15 @@ use super::ines::{Flags1, INESHeader};
 pub struct Cartridge {
     header: INESHeader,
     trainer: Option<[u8; 512]>,
+    prg_rom: Vec<u8>,
+    chr_rom: Vec<u8>,
 }
 
 impl Cartridge {
     const VALID_MAGIC: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A];
     const HEADER_SIZE: u8 = 16;
-    const PRG_ROM_BLOCK_SZ: u16 = 16384;
-    const CHR_ROM_BLOCK_SZ: u16 = 8192;
+    const PRG_ROM_BLOCK_SZ: usize = 16384;
+    const CHR_ROM_BLOCK_SZ: usize = 8192;
 
     pub fn new(path: &str) -> Result<Self, Error> {
         // Open the ROM file
@@ -50,8 +52,27 @@ impl Cartridge {
             file.read_exact(&mut trainer_data)?;
             trainer = Some(trainer_data);
         }
+        // Read PRG ROM
+        let mut prg_rom = Vec::new();
+        prg_rom.resize(
+            header.prg_rom_size as usize * Cartridge::PRG_ROM_BLOCK_SZ,
+            0u8,
+        );
+        file.read_exact(&mut prg_rom)?;
+        // Read CHR ROM
+        let mut chr_rom = Vec::new();
+        chr_rom.resize(
+            header.chr_rom_size as usize * Cartridge::CHR_ROM_BLOCK_SZ,
+            0u8,
+        );
+        file.read_exact(&mut chr_rom)?;
 
-        Ok(Self { header, trainer })
+        Ok(Self {
+            header,
+            trainer,
+            prg_rom,
+            chr_rom,
+        })
     }
 }
 
@@ -73,5 +94,13 @@ mod tests {
         assert_eq!(cartridge.header.tv_system, 0);
         // Validate no trainer
         assert_eq!(cartridge.trainer, None);
+
+        // Check sizes of buffers
+        assert_eq!(cartridge.prg_rom.len(), Cartridge::PRG_ROM_BLOCK_SZ);
+        assert_eq!(cartridge.chr_rom.len(), Cartridge::CHR_ROM_BLOCK_SZ);
+
+        // Check first and last few bytes of prg rom
+        assert_eq!(cartridge.prg_rom[..4], [0x4c, 0xF5, 0xC5, 0x60]);
+        assert_eq!(*cartridge.prg_rom.last().unwrap(), 0xC5);
     }
 }
