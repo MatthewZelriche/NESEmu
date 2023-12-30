@@ -827,6 +827,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_memory_editor"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b63eff92771d751fc98d15094c8b1112988ef668179452c009a3128add18a20"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "emath"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1488,6 +1497,7 @@ name = "nes_emu"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "egui_memory_editor",
  "tock-registers",
 ]
 
