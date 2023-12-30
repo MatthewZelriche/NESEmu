@@ -10,7 +10,7 @@ use tock_registers::{
     registers::InMemoryRegister,
 };
 
-use super::{bus::Bus, instruction::DecodedInstruction};
+use super::bus::Bus;
 
 register_bitfields!(
     u8,
@@ -55,7 +55,7 @@ impl Write for OptionalFile {
 
 pub struct CPU {
     pub registers: CPURegisters,
-    current_instruction: Option<DecodedInstruction>,
+    cycles_remaining: u8,
     total_cycles: usize,
     pub log_file: OptionalFile,
 }
@@ -67,7 +67,7 @@ impl CPU {
         bus.read_exact(0xFFFC, &mut buf)?;
         Ok(Self {
             registers: CPURegisters::new(u16::from_le_bytes(buf) as usize),
-            current_instruction: None,
+            cycles_remaining: 0,
             total_cycles: 7, // TODO: CPU init takes some prep work, not sure if I should step
             // through this or if its good enough to just set the
             // value instantly here
@@ -99,64 +99,42 @@ impl CPU {
     }
 
     pub fn step<T: Bus>(&mut self, bus: &mut T) {
-        match self.current_instruction.as_mut() {
-            Some(instruction) => {
-                instruction.cycles_remaining -= 1;
-                if instruction.cycles_remaining == 0 {
-                    self.current_instruction = None;
+        if self.cycles_remaining != 0 {
+            self.cycles_remaining -= 1;
+        } else {
+            // The nestest log requires the cpu register state PRIOR to executing
+            // the instruction, so we copy the current state of the registers
+            // for later, when we print to the log
+            let old_state = self.registers.clone();
+
+            // Fetch the opcode
+            // Throw a BRK instruction is we can't read the opcode memory location
+            // TODO: Better way of handling this?
+            let opcode_addr = self.registers.program_counter;
+            let opcode = bus.read_byte(opcode_addr).unwrap_or(0x0);
+            self.registers.program_counter += 1;
+            write!(self.log_file, "{:X}  ", opcode_addr).unwrap();
+
+            match self.execute_opcode(opcode, bus) {
+                Ok(cycle_count) => {
+                    writeln!(
+                        self.log_file,
+                        "     {} CYC:{}",
+                        old_state, self.total_cycles
+                    )
+                    .unwrap();
+                    self.total_cycles += cycle_count as usize;
+                    self.cycles_remaining = cycle_count;
                 }
-            }
-            None => {
-                // The nestest log requires the cpu register state PRIOR to executing
-                // the instruction, so we copy the current state of the registers
-                // for later, when we print to the log
-                let old_state = self.registers.clone();
-
-                // Fetch the opcode
-                // Throw a BRK instruction is we can't read the opcode memory location
-                // TODO: Better way of handling this?
-                let opcode_addr = self.registers.program_counter;
-                let opcode = bus.read_byte(opcode_addr).unwrap_or(0x0);
-                self.registers.program_counter += 1;
-                write!(self.log_file, "{:X}  ", opcode_addr).unwrap();
-
-                match self.execute_opcode(opcode, bus) {
-                    Ok(instruction) => {
-                        writeln!(
-                            self.log_file,
-                            "     {} CYC:{}",
-                            old_state, self.total_cycles
-                        )
-                        .unwrap();
-                        self.log_to_screen(opcode_addr, &instruction, &old_state);
-                        self.total_cycles += instruction.cycles_total as usize;
-                        self.current_instruction = Some(instruction);
-                    }
-                    Err(error) => {
-                        log::error!(
-                            "Instruction at address {:X} failed with msg: {}",
-                            opcode_addr,
-                            error
-                        )
-                    }
+                Err(error) => {
+                    log::error!(
+                        "Instruction at address {:X} failed with msg: {}",
+                        opcode_addr,
+                        error
+                    )
                 }
             }
         }
-    }
-
-    pub fn log_to_screen(
-        &mut self,
-        opcode_addr: usize,
-        instruction: &DecodedInstruction,
-        old_state: &CPURegisters,
-    ) {
-        log::info!(
-            "{:X}  {}     {}   CYC:{}",
-            opcode_addr,
-            instruction,
-            old_state,
-            self.total_cycles
-        );
     }
 }
 
