@@ -25,7 +25,7 @@ impl BusImpl {
 impl Bus for BusImpl {
     fn read_byte(&self, address: usize) -> Result<u8, &str> {
         match address {
-            (0..=2048) => Ok(self.system_ram[address]),
+            (0..=0x1FFF) => Ok(self.system_ram[address % 0x0800]),
             _ => Err("Bad address read on Bus"),
         }
     }
