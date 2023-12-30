@@ -13,6 +13,7 @@ use super::{
 pub enum AddressingMode {
     ABSOLUTE,
     IMMEDIATE,
+    ZEROPAGE,
 }
 
 pub struct DecodedInstruction {
@@ -43,13 +44,26 @@ impl DecodedInstruction {
         match this.address_mode {
             AddressingMode::ABSOLUTE => {
                 this.byte_sequence = cpu.byte_sequence_absolute(opcode, bus)?;
+                write!(cpu.log_file, "{}", this).unwrap();
             }
             AddressingMode::IMMEDIATE => {
                 this.byte_sequence = cpu.byte_sequence_immediate(opcode, bus)?;
+                write!(cpu.log_file, "{}", this).unwrap();
+            }
+            AddressingMode::ZEROPAGE => {
+                this.byte_sequence = cpu.byte_sequence_zeropage(opcode, bus)?;
+                // Have to a bunch of extra junk to match the nestest output
+                write!(
+                    cpu.log_file,
+                    "{} = {:02X}",
+                    this,
+                    bus.read_byte(this.byte_sequence[1] as usize)
+                        .unwrap_or_default()
+                )
+                .unwrap();
             }
         }
 
-        write!(cpu.log_file, "{}", this).unwrap();
         Ok(this)
     }
 }
@@ -61,6 +75,14 @@ impl CPU {
         bus: &'a mut T,
     ) -> Result<DecodedInstruction, &'static str> {
         match opcode {
+            0x86 => {
+                let instr =
+                    DecodedInstruction::new(opcode, "STX", AddressingMode::ZEROPAGE, 3, self, bus)?;
+
+                bus.write_byte(instr.byte_sequence[1] as usize, self.registers.x_reg)?;
+
+                Ok(instr)
+            }
             0x4C => {
                 let instr =
                     DecodedInstruction::new(opcode, "JMP", AddressingMode::ABSOLUTE, 3, self, bus)?;
@@ -109,6 +131,14 @@ impl CPU {
         Ok(ArrayVec::from([opcode, bus.read_byte(addr)?, 0x0]))
     }
 
+    fn byte_sequence_zeropage<T: Bus>(
+        &mut self,
+        opcode: u8,
+        bus: &mut T,
+    ) -> Result<ArrayVec<u8, 3>, &'static str> {
+        self.byte_sequence_immediate(opcode, bus)
+    }
+
     fn byte_sequence_absolute<T: Bus>(
         &mut self,
         opcode: u8,
@@ -140,6 +170,16 @@ impl Display for DecodedInstruction {
                 write!(
                     f,
                     "{:X} {:X} {} #${:X}",
+                    self.byte_sequence[0],
+                    self.byte_sequence[1],
+                    self.mnemonic,
+                    self.byte_sequence[1]
+                )
+            }
+            AddressingMode::ZEROPAGE => {
+                write!(
+                    f,
+                    "{:X} {:X} {} ${:X}",
                     self.byte_sequence[0],
                     self.byte_sequence[1],
                     self.mnemonic,
