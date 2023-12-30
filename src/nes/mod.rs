@@ -26,14 +26,10 @@ impl NES {
             ui: UI::new(),
         })
     }
-
-    pub fn reset(&mut self, rom_path: &str) {
-        self.cpu.reset();
-    }
 }
 
 impl eframe::App for NES {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, _: &mut eframe::Frame) {
         self.cpu.step(&mut self.bus);
         self.ui.render(ctx, &mut self.bus);
         ctx.request_repaint();

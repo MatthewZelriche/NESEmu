@@ -61,7 +61,7 @@ impl CPU {
         })
     }
 
-    pub fn reset(&mut self) {
+    pub fn _reset(&mut self) {
         self.registers.stack_ptr -= 3;
         self.registers
             .status_register
