@@ -24,36 +24,33 @@ pub struct DecodedInstruction {
 }
 
 impl DecodedInstruction {
-    pub fn new_absolute<T: Bus>(
+    pub fn new<T: Bus>(
         opcode: u8,
         mnemonic: &'static str,
+        address_mode: AddressingMode,
         cycles_total: u8,
         cpu: &mut CPU,
         bus: &mut T,
     ) -> Result<Self, &'static str> {
-        Ok(DecodedInstruction {
+        let mut this = DecodedInstruction {
             mnemonic,
-            address_mode: AddressingMode::ABSOLUTE,
-            byte_sequence: cpu.byte_sequence_absolute(opcode, bus)?,
+            address_mode,
+            byte_sequence: ArrayVec::new(),
             cycles_total,
             cycles_remaining: cycles_total,
-        })
-    }
+        };
 
-    pub fn new_immediate<T: Bus>(
-        opcode: u8,
-        mnemonic: &'static str,
-        cycles_total: u8,
-        cpu: &mut CPU,
-        bus: &mut T,
-    ) -> Result<Self, &'static str> {
-        Ok(DecodedInstruction {
-            mnemonic,
-            address_mode: AddressingMode::IMMEDIATE,
-            byte_sequence: cpu.byte_sequence_immediate(opcode, bus)?,
-            cycles_total,
-            cycles_remaining: cycles_total,
-        })
+        match this.address_mode {
+            AddressingMode::ABSOLUTE => {
+                this.byte_sequence = cpu.byte_sequence_absolute(opcode, bus)?;
+            }
+            AddressingMode::IMMEDIATE => {
+                this.byte_sequence = cpu.byte_sequence_immediate(opcode, bus)?;
+            }
+        }
+
+        write!(cpu.log_file, "{}", this).unwrap();
+        Ok(this)
     }
 }
 
@@ -65,8 +62,8 @@ impl CPU {
     ) -> Result<DecodedInstruction, &'static str> {
         match opcode {
             0x4C => {
-                let instr = DecodedInstruction::new_absolute(opcode, "JMP", 3, self, bus)?;
-                write!(self.log_file, "{}", instr).unwrap();
+                let instr =
+                    DecodedInstruction::new(opcode, "JMP", AddressingMode::ABSOLUTE, 3, self, bus)?;
 
                 self.registers.program_counter =
                     CPU::operand_absolute(&instr.byte_sequence) as usize;
@@ -74,8 +71,14 @@ impl CPU {
                 Ok(instr)
             }
             0xA2 => {
-                let instr = DecodedInstruction::new_immediate(opcode, "LDX", 2, self, bus)?;
-                write!(self.log_file, "{}", instr).unwrap();
+                let instr = DecodedInstruction::new(
+                    opcode,
+                    "LDX",
+                    AddressingMode::IMMEDIATE,
+                    2,
+                    self,
+                    bus,
+                )?;
 
                 self.registers.x_reg = instr.byte_sequence[1];
                 if self.registers.x_reg == 0 {
