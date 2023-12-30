@@ -5,7 +5,7 @@ use super::cartridge::Cartridge;
 pub trait Bus {
     fn read_byte(&self, address: usize) -> Result<u8, &'static str>;
     fn read_exact(&self, address: usize, buf: &mut [u8]) -> Result<(), &'static str>;
-    fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &str>;
+    fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str>;
 }
 
 pub struct BusImpl {
@@ -43,7 +43,7 @@ impl Bus for BusImpl {
         Ok(())
     }
 
-    fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &str> {
+    fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
         match address {
             (0..=2048) => Ok(self.system_ram[address] = value),
             _ => Err("Bad address write on Bus"),
