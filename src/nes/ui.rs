@@ -13,7 +13,7 @@ impl UI {
         Self {
             mem_editor: MemoryEditor::new()
                 .with_address_range("All", 0..0xFFFF)
-                .with_address_range("RAM", 0xFF00..0x0800)
+                .with_address_range("RAM", 0..0x0800)
                 .with_window_title("Memory"),
             mem_editor_open: true,
         }
