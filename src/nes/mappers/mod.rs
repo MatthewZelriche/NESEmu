@@ -3,7 +3,7 @@ use self::mapper000::Mapper000;
 mod mapper000;
 
 pub trait Mapper {
-    fn map_prg_address(&self, bus_address: usize) -> Result<usize, &str>;
+    fn map_prg_address(&self, bus_address: usize) -> Result<usize, &'static str>;
     fn write_register(&mut self, address: u16, val: u8) -> bool;
 }
 

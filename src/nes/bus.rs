@@ -3,7 +3,7 @@ use std::io::Error;
 use super::cartridge::Cartridge;
 
 pub trait Bus {
-    fn read_byte(&self, address: usize) -> Result<u8, &str>;
+    fn read_byte(&self, address: usize) -> Result<u8, &'static str>;
     fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &str>;
 }
 
@@ -23,7 +23,7 @@ impl BusImpl {
 }
 
 impl Bus for BusImpl {
-    fn read_byte(&self, address: usize) -> Result<u8, &str> {
+    fn read_byte(&self, address: usize) -> Result<u8, &'static str> {
         match address {
             (0..=0x1FFF) => Ok(self.system_ram[address % 0x0800]),
             (0x4020..=0xFFFF) => {

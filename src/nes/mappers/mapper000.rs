@@ -11,7 +11,7 @@ impl Mapper000 {
 }
 
 impl Mapper for Mapper000 {
-    fn map_prg_address(&self, bus_address: usize) -> Result<usize, &str> {
+    fn map_prg_address(&self, bus_address: usize) -> Result<usize, &'static str> {
         match bus_address {
             (0x8000..=0xBFFF) => Ok(bus_address % 0x8000),
             (0xC000..=0xFFFF) => {
