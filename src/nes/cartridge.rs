@@ -62,5 +62,7 @@ mod tests {
         assert_eq!(cartridge.header.flags2.get(), 0);
         assert_eq!(cartridge.header.prg_ram_size, 0);
         assert_eq!(cartridge.header.tv_system, 0);
+        // Validate no trainer
+        assert_eq!(cartridge.trainer, None);
     }
 }
