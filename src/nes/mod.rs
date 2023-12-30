@@ -6,6 +6,7 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod ines;
+mod instruction;
 mod mappers;
 mod ui;
 
@@ -31,6 +32,7 @@ impl NES {
 
 impl eframe::App for NES {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        self.cpu.step(&mut self.bus);
         self.ui.render(ctx, &mut self.bus);
         ctx.request_repaint();
     }
