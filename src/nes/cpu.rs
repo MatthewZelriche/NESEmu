@@ -35,11 +35,29 @@ pub struct CPURegisters {
     pub status_register: InMemoryRegister<u8, Status::Register>,
 }
 
+pub struct OptionalFile(Option<File>);
+
+// This impl cannot fail
+impl Write for OptionalFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(file) = self.0.as_mut() {
+            let _ = write!(file, "{}", std::str::from_utf8(buf).unwrap()); // Don't care if fails...
+            return Ok(buf.len());
+        }
+
+        Ok(0)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 pub struct CPU {
     pub registers: CPURegisters,
     current_instruction: Option<DecodedInstruction>,
     total_cycles: usize,
-    log_file: Option<File>,
+    pub log_file: OptionalFile,
 }
 
 impl CPU {
@@ -53,12 +71,14 @@ impl CPU {
             total_cycles: 7, // TODO: CPU init takes some prep work, not sure if I should step
             // through this or if its good enough to just set the
             // value instantly here
-            log_file: OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("nesemu.log")
-                .ok(),
+            log_file: OptionalFile(
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open("nesemu.log")
+                    .ok(),
+            ),
         })
     }
 
@@ -89,10 +109,12 @@ impl CPU {
                 let opcode_addr = self.registers.program_counter;
                 let opcode = bus.read_byte(opcode_addr).unwrap_or(0x0);
                 self.registers.program_counter += 1;
+                write!(self.log_file, "{:X}  ", opcode_addr).unwrap();
 
                 match self.execute_opcode(opcode, bus) {
                     Ok(instruction) => {
-                        self.log_instruction(opcode_addr, &instruction, &old_state);
+                        writeln!(self.log_file, "     {}", old_state).unwrap();
+                        self.log_to_screen(opcode_addr, &instruction, &old_state);
                         self.total_cycles += instruction.cycles_total as usize;
                         self.current_instruction = Some(instruction);
                     }
@@ -108,21 +130,19 @@ impl CPU {
         }
     }
 
-    pub fn log_instruction(
+    pub fn log_to_screen(
         &mut self,
         opcode_addr: usize,
         instruction: &DecodedInstruction,
         old_state: &CPURegisters,
     ) {
-        let fmt = format!(
+        log::info!(
             "{:X}  {}     {}   CYC:{}",
-            opcode_addr, instruction, old_state, self.total_cycles
+            opcode_addr,
+            instruction,
+            old_state,
+            self.total_cycles
         );
-        log::info!("{}", fmt);
-
-        if let Some(log) = &mut self.log_file {
-            let _ = writeln!(log, "{}", fmt);
-        }
     }
 }
 

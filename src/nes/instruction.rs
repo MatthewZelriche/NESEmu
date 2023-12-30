@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::io::Write;
 
 use arrayvec::ArrayVec;
 use bitfield::Bit;
@@ -22,6 +23,40 @@ pub struct DecodedInstruction {
     pub(crate) cycles_remaining: u8,
 }
 
+impl DecodedInstruction {
+    pub fn new_absolute<T: Bus>(
+        opcode: u8,
+        mnemonic: &'static str,
+        cycles_total: u8,
+        cpu: &mut CPU,
+        bus: &mut T,
+    ) -> Result<Self, &'static str> {
+        Ok(DecodedInstruction {
+            mnemonic,
+            address_mode: AddressingMode::ABSOLUTE,
+            byte_sequence: cpu.byte_sequence_absolute(opcode, bus)?,
+            cycles_total,
+            cycles_remaining: cycles_total,
+        })
+    }
+
+    pub fn new_immediate<T: Bus>(
+        opcode: u8,
+        mnemonic: &'static str,
+        cycles_total: u8,
+        cpu: &mut CPU,
+        bus: &mut T,
+    ) -> Result<Self, &'static str> {
+        Ok(DecodedInstruction {
+            mnemonic,
+            address_mode: AddressingMode::IMMEDIATE,
+            byte_sequence: cpu.byte_sequence_immediate(opcode, bus)?,
+            cycles_total,
+            cycles_remaining: cycles_total,
+        })
+    }
+}
+
 impl CPU {
     pub fn execute_opcode<'a, T: Bus>(
         &'a mut self,
@@ -30,13 +65,8 @@ impl CPU {
     ) -> Result<DecodedInstruction, &'static str> {
         match opcode {
             0x4C => {
-                let instr = DecodedInstruction {
-                    mnemonic: "JMP",
-                    address_mode: AddressingMode::ABSOLUTE,
-                    byte_sequence: self.byte_sequence_absolute(opcode, bus)?,
-                    cycles_total: 3,
-                    cycles_remaining: 3,
-                };
+                let instr = DecodedInstruction::new_absolute(opcode, "JMP", 3, self, bus)?;
+                write!(self.log_file, "{}", instr).unwrap();
 
                 self.registers.program_counter =
                     CPU::operand_absolute(&instr.byte_sequence) as usize;
@@ -44,13 +74,8 @@ impl CPU {
                 Ok(instr)
             }
             0xA2 => {
-                let instr = DecodedInstruction {
-                    mnemonic: "LDX",
-                    address_mode: AddressingMode::IMMEDIATE,
-                    byte_sequence: self.byte_sequence_immediate(opcode, bus)?,
-                    cycles_total: 2,
-                    cycles_remaining: 2,
-                };
+                let instr = DecodedInstruction::new_immediate(opcode, "LDX", 2, self, bus)?;
+                write!(self.log_file, "{}", instr).unwrap();
 
                 self.registers.x_reg = instr.byte_sequence[1];
                 if self.registers.x_reg == 0 {
