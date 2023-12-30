@@ -113,7 +113,12 @@ impl CPU {
 
                 match self.execute_opcode(opcode, bus) {
                     Ok(instruction) => {
-                        writeln!(self.log_file, "     {}", old_state).unwrap();
+                        writeln!(
+                            self.log_file,
+                            "     {} CYC:{}",
+                            old_state, self.total_cycles
+                        )
+                        .unwrap();
                         self.log_to_screen(opcode_addr, &instruction, &old_state);
                         self.total_cycles += instruction.cycles_total as usize;
                         self.current_instruction = Some(instruction);
@@ -176,7 +181,7 @@ impl Display for CPURegisters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A: {:02X} X: {:02X} Y: {:02X} P: {:02X} SP: {:02X}",
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
             self.accumulator,
             self.x_reg,
             self.y_reg,

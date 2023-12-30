@@ -158,7 +158,7 @@ impl Display for DecodedInstruction {
             AddressingMode::ABSOLUTE => {
                 write!(
                     f,
-                    "{:X} {:X} {:X}  {} ${:X}",
+                    "{:02X} {:02X} {:02X}  {} ${:02X}",
                     self.byte_sequence[0],
                     self.byte_sequence[1],
                     self.byte_sequence[2],
@@ -169,7 +169,7 @@ impl Display for DecodedInstruction {
             AddressingMode::IMMEDIATE => {
                 write!(
                     f,
-                    "{:X} {:X} {} #${:X}",
+                    "{:02X} {:02X} {} #${:02X}",
                     self.byte_sequence[0],
                     self.byte_sequence[1],
                     self.mnemonic,
@@ -179,7 +179,7 @@ impl Display for DecodedInstruction {
             AddressingMode::ZEROPAGE => {
                 write!(
                     f,
-                    "{:X} {:X} {} ${:X}",
+                    "{:02X} {:02X} {} ${:02X}",
                     self.byte_sequence[0],
                     self.byte_sequence[1],
                     self.mnemonic,
