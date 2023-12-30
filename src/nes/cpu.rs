@@ -1,4 +1,4 @@
-use tock_registers::{register_bitfields, registers::InMemoryRegister};
+use tock_registers::{interfaces::ReadWriteable, register_bitfields, registers::InMemoryRegister};
 
 register_bitfields!(
     u8,
@@ -23,7 +23,12 @@ pub struct CPU {
     status_register: InMemoryRegister<u8, Status::Register>,
 }
 
-impl CPU {}
+impl CPU {
+    pub fn reset(&mut self) {
+        self.stack_ptr -= 3;
+        self.status_register.modify(Status::INT_DISABLE::SET);
+    }
+}
 
 impl Default for CPU {
     fn default() -> Self {

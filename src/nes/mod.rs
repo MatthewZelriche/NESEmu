@@ -1,7 +1,11 @@
+use std::io::Error;
+
 use self::{bus::BusImpl, cpu::CPU};
 
 mod bus;
+mod cartridge;
 mod cpu;
+mod ines;
 
 pub struct NES {
     cpu: CPU,
@@ -9,17 +13,15 @@ pub struct NES {
 }
 
 impl NES {
-    pub fn new() -> Self {
-        NES::default()
+    pub fn new(rom_path: &str) -> Result<Self, Error> {
+        Ok(Self {
+            cpu: CPU::default(),
+            bus: BusImpl::new(rom_path)?,
+        })
     }
-}
 
-impl Default for NES {
-    fn default() -> Self {
-        Self {
-            cpu: Default::default(),
-            bus: Default::default(),
-        }
+    pub fn reset(&mut self, rom_path: &str) {
+        self.cpu.reset();
     }
 }
 
