@@ -1,4 +1,8 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    fs::{File, OpenOptions},
+    io::Write,
+};
 
 use tock_registers::{
     interfaces::{ReadWriteable, Readable},
@@ -35,6 +39,7 @@ pub struct CPU {
     pub registers: CPURegisters,
     current_instruction: Option<DecodedInstruction>,
     total_cycles: usize,
+    log_file: Option<File>,
 }
 
 impl CPU {
@@ -46,8 +51,13 @@ impl CPU {
             registers: CPURegisters::new(u16::from_le_bytes(buf) as usize),
             current_instruction: None,
             total_cycles: 7, // TODO: CPU init takes some prep work, not sure if I should step
-                             // through this or if its good enough to just set the
-                             // value instantly here
+            // through this or if its good enough to just set the
+            // value instantly here
+            log_file: OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open("nesemu.log")
+                .ok(),
         })
     }
 
@@ -82,7 +92,7 @@ impl CPU {
 
                 match self.execute_opcode(opcode, bus) {
                     Ok(instruction) => {
-                        CPU::log_instruction(
+                        self.log_instruction(
                             opcode_addr,
                             &instruction,
                             &old_state,
@@ -103,18 +113,21 @@ impl CPU {
     }
 
     pub fn log_instruction(
+        &mut self,
         opcode_addr: usize,
         instruction: &DecodedInstruction,
         old_state: &CPURegisters,
         old_total_cycles: usize,
     ) {
-        log::info!(
+        let fmt = format!(
             "{:X}  {}     {}   CYC:{}",
-            opcode_addr,
-            instruction,
-            old_state,
-            old_total_cycles
+            opcode_addr, instruction, old_state, old_total_cycles
         );
+        log::info!("{}", fmt);
+
+        if let Some(log) = &mut self.log_file {
+            let _ = log.write(fmt.as_bytes()); // Don't care much if it fails...
+        }
     }
 }
 
