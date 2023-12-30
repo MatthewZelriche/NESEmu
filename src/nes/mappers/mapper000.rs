@@ -11,7 +11,7 @@ impl Mapper000 {
 }
 
 impl Mapper for Mapper000 {
-    fn map_prg_address(&self, bus_address: usize) -> Result<usize, ()> {
+    fn map_prg_address(&self, bus_address: usize) -> Result<usize, &str> {
         match bus_address {
             (0x8000..=0xBFFF) => Ok(bus_address % 0x8000),
             (0xC000..=0xFFFF) => {
@@ -26,7 +26,7 @@ impl Mapper for Mapper000 {
                 };
                 Ok(bus_address % mirror)
             }
-            _ => Err(()),
+            _ => Err("Bad prg address read on cartridge"),
         }
     }
 
