@@ -14,6 +14,7 @@ pub enum AddressingMode {
     ABSOLUTE,
     IMMEDIATE,
     ZEROPAGE,
+    IMPLIED,
 }
 
 pub struct DecodedInstruction {
@@ -48,6 +49,10 @@ impl DecodedInstruction {
             }
             AddressingMode::IMMEDIATE => {
                 this.byte_sequence = cpu.byte_sequence_immediate(opcode, bus)?;
+                write!(cpu.log_file, "{}", this).unwrap();
+            }
+            AddressingMode::IMPLIED => {
+                this.byte_sequence = ArrayVec::from([opcode, 0x0, 0x0]);
                 write!(cpu.log_file, "{}", this).unwrap();
             }
             AddressingMode::ZEROPAGE => {
@@ -119,6 +124,14 @@ impl CPU {
                 if self.registers.x_reg.bit(7) {
                     self.registers.status_register.modify(Status::NEGATIVE::SET);
                 }
+
+                Ok(instr)
+            }
+            0xEA => {
+                let instr =
+                    DecodedInstruction::new(opcode, "NOP", AddressingMode::IMPLIED, 2, self, bus)?;
+
+                // NOP, do nothing...
 
                 Ok(instr)
             }
@@ -195,6 +208,9 @@ impl Display for DecodedInstruction {
                     self.mnemonic,
                     self.byte_sequence[1]
                 )
+            }
+            AddressingMode::IMPLIED => {
+                write!(f, "{:02X} {}", self.byte_sequence[0], self.mnemonic)
             }
         }
     }
