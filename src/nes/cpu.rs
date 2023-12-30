@@ -81,7 +81,6 @@ impl CPU {
                 // the instruction, so we copy the current state of the registers
                 // for later, when we print to the log
                 let old_state = self.registers.clone();
-                let old_total_cycles = self.total_cycles;
 
                 // Fetch the opcode
                 // Throw a BRK instruction is we can't read the opcode memory location
@@ -92,12 +91,8 @@ impl CPU {
 
                 match self.execute_opcode(opcode, bus) {
                     Ok(instruction) => {
-                        self.log_instruction(
-                            opcode_addr,
-                            &instruction,
-                            &old_state,
-                            old_total_cycles,
-                        );
+                        self.log_instruction(opcode_addr, &instruction, &old_state);
+                        self.total_cycles += instruction.cycles_total as usize;
                         self.current_instruction = Some(instruction);
                     }
                     Err(error) => {
@@ -117,16 +112,15 @@ impl CPU {
         opcode_addr: usize,
         instruction: &DecodedInstruction,
         old_state: &CPURegisters,
-        old_total_cycles: usize,
     ) {
         let fmt = format!(
             "{:X}  {}     {}   CYC:{}",
-            opcode_addr, instruction, old_state, old_total_cycles
+            opcode_addr, instruction, old_state, self.total_cycles
         );
         log::info!("{}", fmt);
 
         if let Some(log) = &mut self.log_file {
-            let _ = log.write(fmt.as_bytes()); // Don't care much if it fails...
+            let _ = writeln!(log, "{}", fmt);
         }
     }
 }
