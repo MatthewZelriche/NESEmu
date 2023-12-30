@@ -34,6 +34,7 @@ pub struct CPURegisters {
 pub struct CPU {
     pub registers: CPURegisters,
     current_instruction: Option<DecodedInstruction>,
+    total_cycles: usize,
 }
 
 impl CPU {
@@ -44,8 +45,12 @@ impl CPU {
         Ok(Self {
             registers: CPURegisters::new(u16::from_le_bytes(buf) as usize),
             current_instruction: None,
+            total_cycles: 7, // TODO: CPU init takes some prep work, not sure if I should step
+                             // through this or if its good enough to just set the
+                             // value instantly here
         })
     }
+
     pub fn reset(&mut self) {
         self.registers.stack_ptr -= 3;
         self.registers
@@ -66,6 +71,7 @@ impl CPU {
                 // the instruction, so we copy the current state of the registers
                 // for later, when we print to the log
                 let old_state = self.registers.clone();
+                let old_total_cycles = self.total_cycles;
 
                 // Fetch the opcode
                 // Throw a BRK instruction is we can't read the opcode memory location
@@ -76,7 +82,12 @@ impl CPU {
 
                 match self.execute_opcode(opcode, bus) {
                     Ok(instruction) => {
-                        CPU::log_instruction(opcode_addr, &instruction, &old_state);
+                        CPU::log_instruction(
+                            opcode_addr,
+                            &instruction,
+                            &old_state,
+                            old_total_cycles,
+                        );
                         self.current_instruction = Some(instruction);
                     }
                     Err(error) => {
@@ -95,8 +106,15 @@ impl CPU {
         opcode_addr: usize,
         instruction: &DecodedInstruction,
         old_state: &CPURegisters,
+        old_total_cycles: usize,
     ) {
-        log::info!("{:X}  {}     {}", opcode_addr, instruction, old_state);
+        log::info!(
+            "{:X}  {}     {}   CYC:{}",
+            opcode_addr,
+            instruction,
+            old_state,
+            old_total_cycles
+        );
     }
 }
 
