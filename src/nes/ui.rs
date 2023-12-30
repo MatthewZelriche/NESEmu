@@ -1,4 +1,4 @@
-use eframe::egui::Context;
+use eframe::egui::{Context, Window};
 use egui_memory_editor::MemoryEditor;
 
 use super::bus::Bus;
@@ -10,6 +10,7 @@ pub struct UI {
 
 impl UI {
     pub fn new() -> Self {
+        egui_logger::init().unwrap();
         Self {
             mem_editor: MemoryEditor::new()
                 .with_address_range("All", 0..0xFFFF)
@@ -30,5 +31,9 @@ impl UI {
                 let _ = bus.write_byte(address, val);
             },
         );
+        Window::new("Log").show(ctx, |ui| {
+            // draws the logger ui.
+            egui_logger::logger_ui(ui);
+        });
     }
 }

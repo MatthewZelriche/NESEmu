@@ -827,6 +827,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_logger"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "503d989b82016134d7f45032f9469adb50ed731c0d67de11f1758ba223a76d07"
+dependencies = [
+ "egui",
+ "log",
+ "once_cell",
+ "regex",
+]
+
+[[package]]
 name = "egui_memory_editor"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1497,7 +1509,9 @@ name = "nes_emu"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "egui_logger",
  "egui_memory_editor",
+ "log",
  "tock-registers",
 ]
 
