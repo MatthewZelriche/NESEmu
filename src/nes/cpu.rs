@@ -54,8 +54,9 @@ impl CPU {
             // through this or if its good enough to just set the
             // value instantly here
             log_file: OpenOptions::new()
-                .append(true)
+                .write(true)
                 .create(true)
+                .truncate(true)
                 .open("nesemu.log")
                 .ok(),
         })
