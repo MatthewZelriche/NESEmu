@@ -6,6 +6,7 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod ines;
+mod mappers;
 
 pub struct NES {
     cpu: CPU,
