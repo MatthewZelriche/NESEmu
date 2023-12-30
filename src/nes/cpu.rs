@@ -82,7 +82,7 @@ impl CPU {
                     Err(error) => {
                         log::error!(
                             "Instruction at address {:X} failed with msg: {}",
-                            opcode,
+                            opcode_addr,
                             error
                         )
                     }
