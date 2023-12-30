@@ -43,7 +43,7 @@ impl CPU {
     }
 
     fn operand_absolute(byte_sequence: &[u8]) -> u16 {
-        u16::from_be_bytes(byte_sequence[1..].try_into().unwrap())
+        u16::from_le_bytes(byte_sequence[1..].try_into().unwrap())
     }
 
     fn byte_sequence_absolute<'a, T: Bus>(
