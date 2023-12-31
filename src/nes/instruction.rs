@@ -708,8 +708,9 @@ impl CPU {
     ) -> Result<u8, &'static str> {
         // Store the current program counter (which, right now, points to the NEXT
         // instruction after the one we are processing)
+        // big endian because we need to push to the stack in reverse order of how they should be
         self.push_stack(
-            &u16::to_le_bytes((self.registers.program_counter) as u16),
+            &u16::to_be_bytes((self.registers.program_counter - 1) as u16),
             bus,
         )?;
         self.registers.program_counter = addr;
@@ -719,7 +720,7 @@ impl CPU {
     fn rts(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let mut addr_bytes = [0u8; 2];
         self.pop_stack(&mut addr_bytes, bus)?;
-        self.registers.program_counter = (u16::from_le_bytes(addr_bytes)) as usize;
+        self.registers.program_counter = (u16::from_le_bytes(addr_bytes) + 1) as usize;
         Ok(start_cycles)
     }
 

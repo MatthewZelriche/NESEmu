@@ -63,6 +63,7 @@ pub struct CPU {
 
 impl CPU {
     pub const PAGE_SZ_MASK: usize = 0xFF00;
+    pub const STACK_PG_START: usize = 0x100;
 
     pub fn new<T: Bus>(bus: &T) -> Result<Self, &'static str> {
         // Get start program counter
@@ -94,7 +95,7 @@ impl CPU {
 
     pub fn push_stack<T: Bus>(&mut self, data: &[u8], bus: &mut T) -> Result<(), &'static str> {
         for byte in data {
-            bus.write_byte(self.registers.stack_ptr, *byte)?;
+            bus.write_byte(self.registers.stack_ptr + CPU::STACK_PG_START, *byte)?;
             self.registers.stack_ptr -= 1;
         }
 
@@ -104,11 +105,8 @@ impl CPU {
     pub fn pop_stack<T: Bus>(&mut self, data: &mut [u8], bus: &mut T) -> Result<(), &'static str> {
         for byte in &mut *data {
             self.registers.stack_ptr += 1;
-            *byte = bus.read_byte(self.registers.stack_ptr)?;
+            *byte = bus.read_byte(self.registers.stack_ptr + CPU::STACK_PG_START)?;
         }
-
-        // Reverse the bytes so that they are in the correct order
-        data.reverse();
 
         Ok(())
     }
