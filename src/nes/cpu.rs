@@ -101,8 +101,14 @@ impl CPU {
     }
 
     pub fn pop_stack<T: Bus>(&mut self, data: &mut [u8], bus: &mut T) -> Result<(), &'static str> {
-        bus.read_exact(self.registers.stack_ptr, data)?;
-        self.registers.stack_ptr += data.len();
+        for byte in &mut *data {
+            self.registers.stack_ptr += 1;
+            *byte = bus.read_byte(self.registers.stack_ptr)?;
+        }
+
+        // Reverse the bytes so that they are in the correct order
+        data.reverse();
+
         Ok(())
     }
 
