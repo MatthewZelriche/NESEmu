@@ -17,7 +17,7 @@ use super::{
 pub enum AddressMode {
     IMPLIED,
     IMMEDIATE,
-    ABSOLUTE,
+    ABSOLUTE(bool),
     RELATIVE,
     ZEROPAGE,
 }
@@ -68,7 +68,7 @@ impl CPU {
             }),
             0x20 => Ok(Opcode {
                 mnemonic: "JSR",
-                mode: AddressMode::ABSOLUTE,
+                mode: AddressMode::ABSOLUTE(false),
                 num_bytes: 3,
                 cycles: 6,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
@@ -124,7 +124,7 @@ impl CPU {
             }),
             0x4C => Ok(Opcode {
                 mnemonic: "JMP",
-                mode: AddressMode::ABSOLUTE,
+                mode: AddressMode::ABSOLUTE(false),
                 num_bytes: 3,
                 cycles: 3,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
@@ -220,7 +220,7 @@ impl CPU {
             }),
             0x8E => Ok(Opcode {
                 mnemonic: "STX",
-                mode: AddressMode::ABSOLUTE,
+                mode: AddressMode::ABSOLUTE(true),
                 num_bytes: 3,
                 cycles: 4,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
@@ -292,7 +292,7 @@ impl CPU {
             }),
             0xAD => Ok(Opcode {
                 mnemonic: "LDA",
-                mode: AddressMode::ABSOLUTE,
+                mode: AddressMode::ABSOLUTE(true),
                 num_bytes: 3,
                 cycles: 4,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
@@ -300,7 +300,7 @@ impl CPU {
             }),
             0xAE => Ok(Opcode {
                 mnemonic: "LDX",
-                mode: AddressMode::ABSOLUTE,
+                mode: AddressMode::ABSOLUTE(true),
                 num_bytes: 3,
                 cycles: 4,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
@@ -477,12 +477,14 @@ impl CPU {
             );
 
             match opcode.mode {
-                AddressMode::ABSOLUTE => {
-                    fmt_string = format!(
-                        "{}${:04X}",
-                        fmt_string,
-                        u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap())
-                    );
+                AddressMode::ABSOLUTE(mem_modify) => {
+                    let operand = u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap());
+                    fmt_string = format!("{}${:04X}", fmt_string, operand);
+
+                    if mem_modify {
+                        let byte = bus.read_byte(operand as usize).unwrap();
+                        fmt_string = format!("{} = {:02X}", fmt_string, byte);
+                    }
                 }
                 _ => {} // should never happen
             }
@@ -533,7 +535,7 @@ impl CPU {
         match opcode.mode {
             AddressMode::IMPLIED => 0x0, // Address is irrelevant for implied
             AddressMode::IMMEDIATE => self.registers.program_counter - 1,
-            AddressMode::ABSOLUTE => {
+            AddressMode::ABSOLUTE(_) => {
                 u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize
             }
             AddressMode::RELATIVE => opcode.bytes[1] as usize + self.registers.program_counter,
