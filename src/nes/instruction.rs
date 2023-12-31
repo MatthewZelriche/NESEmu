@@ -90,6 +90,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bvc,
             }),
+            0x60 => Ok(Opcode {
+                mnemonic: "RTS",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 6,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::rts,
+            }),
             0x70 => Ok(Opcode {
                 mnemonic: "BVS",
                 mode: AddressMode::RELATIVE,
@@ -97,6 +105,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bvs,
+            }),
+            0x78 => Ok(Opcode {
+                mnemonic: "SEI",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::sei,
             }),
             0x85 => Ok(Opcode {
                 mnemonic: "STA",
@@ -169,6 +185,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::beq,
+            }),
+            0xF8 => Ok(Opcode {
+                mnemonic: "SED",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::sed,
             }),
             _ => Err("Invalid opcode"),
         }
@@ -272,6 +296,18 @@ impl CPU {
         Ok(start_cycles)
     }
 
+    fn sei(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::INT_DISABLE::SET);
+        Ok(start_cycles)
+    }
+
+    fn sed(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.status_register.modify(Status::DECIMAL::SET);
+        Ok(start_cycles)
+    }
+
     fn sec(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::CARRY::SET);
         Ok(start_cycles)
@@ -283,8 +319,20 @@ impl CPU {
         start_cycles: u8,
         bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
-        self.push_stack(&u16::to_le_bytes(addr as u16), bus)?;
+        // Store the current program counter (which, right now, points to the NEXT
+        // instruction after the one we are processing)
+        self.push_stack(
+            &u16::to_le_bytes((self.registers.program_counter) as u16),
+            bus,
+        )?;
         self.registers.program_counter = addr;
+        Ok(start_cycles)
+    }
+
+    fn rts(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        let mut addr_bytes = [0u8; 2];
+        self.pop_stack(&mut addr_bytes, bus)?;
+        self.registers.program_counter = (u16::from_le_bytes(addr_bytes)) as usize;
         Ok(start_cycles)
     }
 

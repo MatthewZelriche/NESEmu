@@ -100,6 +100,12 @@ impl CPU {
         Ok(())
     }
 
+    pub fn pop_stack<T: Bus>(&mut self, data: &mut [u8], bus: &mut T) -> Result<(), &'static str> {
+        bus.read_exact(self.registers.stack_ptr, data)?;
+        self.registers.stack_ptr += data.len();
+        Ok(())
+    }
+
     pub fn step(&mut self, bus: &mut BusImpl) {
         if self.cycles_remaining != 0 {
             self.cycles_remaining -= 1;
