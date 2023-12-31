@@ -5,7 +5,8 @@ mod nes;
 fn main() {
     // TODO: Dehardcode rom path
     let path = "res/nestest.nes";
-    let native_options = eframe::NativeOptions::default();
+    let mut native_options = eframe::NativeOptions::default();
+    native_options.vsync = false;
     eframe::run_native(
         "NESEmu",
         native_options,
