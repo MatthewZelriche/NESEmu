@@ -351,43 +351,57 @@ impl CPU {
     }
 
     fn write_opcode(&mut self, opcode: &Opcode, bus: &BusImpl) {
-        for i in 0..opcode.num_bytes as usize {
-            write!(self.log_file, " {:02X}", opcode.bytes[i]).unwrap();
-        }
+        let mut fmt_string = String::new();
 
-        // TODO: Quick and dirty, this was dumb. Do it better at some point
-        for i in (opcode.num_bytes + 1) as usize..4 {
-            let spaces = if i == 3 { "   " } else { "    " };
-            write!(self.log_file, "{}", spaces).unwrap();
-        }
+        if opcode.num_bytes == 1 {
+            // The only instruction mode that supports 1 byte is implied...
+            fmt_string = format!("{:02X}{:<8}{} ", opcode.bytes[0], "", opcode.mnemonic);
+        } else if opcode.num_bytes == 2 {
+            fmt_string = format!(
+                "{:02X} {:02X}{:<5}{} ",
+                opcode.bytes[0], opcode.bytes[1], "", opcode.mnemonic
+            );
 
-        write!(self.log_file, " {} ", opcode.mnemonic).unwrap();
+            match opcode.mode {
+                AddressMode::IMMEDIATE => {
+                    fmt_string = format!("{}#${:02X}", fmt_string, opcode.bytes[1]);
+                }
+                AddressMode::RELATIVE => {
+                    fmt_string = format!(
+                        "{}${:02X}",
+                        fmt_string,
+                        opcode.bytes[1] as usize + self.registers.program_counter
+                    );
+                }
+                AddressMode::ZEROPAGE => {
+                    let address_value = bus.read_byte(opcode.bytes[1] as usize).unwrap();
+                    fmt_string = format!(
+                        "{}${:02X} = {:02X}",
+                        fmt_string, opcode.bytes[1], address_value
+                    );
+                }
+                _ => {} // should never happen
+            }
+        } else if opcode.num_bytes == 3 {
+            fmt_string = format!(
+                "{:02X} {:02X} {:02X}  {} ",
+                opcode.bytes[0], opcode.bytes[1], opcode.bytes[2], opcode.mnemonic
+            );
 
-        match opcode.mode {
-            AddressMode::IMPLIED => {}
-            AddressMode::IMMEDIATE => write!(self.log_file, "#${:02X}", opcode.bytes[1]).unwrap(),
-            AddressMode::ABSOLUTE => write!(
-                self.log_file,
-                "${:02X}",
-                u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap())
-            )
-            .unwrap(),
-            AddressMode::RELATIVE => write!(
-                self.log_file,
-                "${:02X}",
-                opcode.bytes[1] as usize + self.registers.program_counter
-            )
-            .unwrap(),
-            AddressMode::ZEROPAGE => {
-                let address_value = bus.read_byte(opcode.bytes[1] as usize).unwrap();
-                write!(
-                    self.log_file,
-                    "${:02X} = {:02X}",
-                    opcode.bytes[1], address_value
-                )
-                .unwrap();
+            match opcode.mode {
+                AddressMode::ABSOLUTE => {
+                    fmt_string = format!(
+                        "{}${:04X}",
+                        fmt_string,
+                        u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap())
+                    );
+                }
+                _ => {} // should never happen
             }
         }
+
+        fmt_string = format!("{:<42}", fmt_string);
+        write!(self.log_file, "{}", fmt_string).unwrap();
     }
 
     pub fn execute_opcode<'a>(
