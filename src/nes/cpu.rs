@@ -22,7 +22,7 @@ register_bitfields!(
         BFLAG       OFFSET(4) NUMBITS(1) [],
         UNUSED      OFFSET(5) NUMBITS(1) [],
         OVERFLOW    OFFSET(6) NUMBITS(1) [],
-        NEGATIVE    OFFSET(6) NUMBITS(1) [],
+        NEGATIVE    OFFSET(7) NUMBITS(1) [],
     ]
 );
 
