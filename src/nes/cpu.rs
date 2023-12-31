@@ -10,7 +10,7 @@ use tock_registers::{
     registers::InMemoryRegister,
 };
 
-use super::bus::Bus;
+use super::bus::{Bus, BusImpl};
 
 register_bitfields!(
     u8,
@@ -100,7 +100,7 @@ impl CPU {
         Ok(())
     }
 
-    pub fn step<T: Bus>(&mut self, bus: &mut T) {
+    pub fn step(&mut self, bus: &mut BusImpl) {
         if self.cycles_remaining != 0 {
             self.cycles_remaining -= 1;
         } else {
@@ -148,6 +148,15 @@ impl CPU {
             self.registers.status_register.modify(Status::ZERO::SET)
         } else {
             self.registers.status_register.modify(Status::ZERO::CLEAR)
+        };
+    }
+    pub fn set_overflow_flag_if(&mut self, predicate: bool) {
+        if predicate {
+            self.registers.status_register.modify(Status::OVERFLOW::SET)
+        } else {
+            self.registers
+                .status_register
+                .modify(Status::OVERFLOW::CLEAR)
         };
     }
     pub fn set_neg_flag_if(&mut self, predicate: bool) {

@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::io::Write;
 
 use bitfield::Bit;
@@ -8,267 +7,408 @@ use tock_registers::{
 };
 
 use super::{
-    bus::Bus,
+    bus::{Bus, BusImpl},
     cpu::{
         Status::{self, Register},
         CPU,
     },
 };
 
-pub enum Operand {
-    ABSOLUTE(u16),
-    IMMEDIATE(u8),
-    ZEROPAGE { operand: u8, old_byte: u8 },
-    RELATIVE { operand: u8, program_counter: usize },
+pub enum AddressMode {
+    IMPLIED,
+    IMMEDIATE,
+    ABSOLUTE,
+    RELATIVE,
+    ZEROPAGE,
 }
 
-impl Display for Operand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Operand::ABSOLUTE(val) => write!(f, "${:02X}", val),
-            Operand::RELATIVE {
-                operand,
-                program_counter,
-            } => write!(f, "${:02X}", *operand as usize + program_counter),
-            Operand::IMMEDIATE(val) => write!(f, "#${:02X}", val),
-            Operand::ZEROPAGE { operand, old_byte } => {
-                write!(f, "${:02X} = {:02X}", operand, old_byte)
-            }
-        }
-    }
+pub struct Opcode {
+    mnemonic: &'static str,
+    mode: AddressMode,
+    bytes: [u8; 3],
+    num_bytes: u8,
+    cycles: u8,
+    execute: fn(&mut CPU, usize, u8, &mut BusImpl) -> Result<u8, &'static str>,
 }
 
 impl CPU {
-    pub fn execute_opcode<'a, T: Bus>(
-        &'a mut self,
-        opcode: u8,
-        bus: &'a mut T,
-    ) -> Result<u8, &'static str> {
-        write!(self.log_file, "{:X} ", opcode).unwrap();
-
+    pub fn lookup_opcode(&mut self, opcode: u8, bus: &mut BusImpl) -> Result<Opcode, &'static str> {
         match opcode {
-            0x18 => {
-                write!(self.log_file, "CLC").unwrap();
-                Ok(self.clc())
-            }
-            0x20 => {
-                let operand = self.get_operand_absolute(bus)?;
-                write!(self.log_file, "JSR {}", operand).unwrap();
-                Ok(self.jsr(operand, bus)?)
-            }
-            0x38 => {
-                write!(self.log_file, "SEC").unwrap();
-                Ok(self.sec())
-            }
-            0x4C => {
-                let operand = self.get_operand_absolute(bus)?;
-                write!(self.log_file, "JMP {}", operand).unwrap();
-                Ok(self.jmp(operand)?)
-            }
-            0x85 => {
-                let operand = self.get_operand_zeropage(bus)?;
-                write!(self.log_file, "STA {}", operand).unwrap();
-                Ok(self.sta(operand, bus)?)
-            }
-            0x86 => {
-                let operand = self.get_operand_zeropage(bus)?;
-                write!(self.log_file, "STX {}", operand).unwrap();
-                Ok(self.stx(operand, bus)?)
-            }
-            0x90 => {
-                let operand = self.get_operand_relative(bus)?;
-                write!(self.log_file, "BCC {}", operand).unwrap();
-                Ok(self.bcc(operand)?)
-            }
-            0xA2 => {
-                let operand = self.get_operand_immediate(bus)?;
-                write!(self.log_file, "LDX {}", operand).unwrap();
-                Ok(self.ldx(operand)?)
-            }
-            0xA9 => {
-                let operand = self.get_operand_immediate(bus)?;
-                write!(self.log_file, "LDA {}", operand).unwrap();
-                Ok(self.lda(operand)?)
-            }
-            0xB0 => {
-                let operand = self.get_operand_relative(bus)?;
-                write!(self.log_file, "BCS {}", operand).unwrap();
-                Ok(self.bcs(operand)?)
-            }
-            0xD0 => {
-                let operand = self.get_operand_relative(bus)?;
-                write!(self.log_file, "BNE {}", operand).unwrap();
-                Ok(self.bne(operand)?)
-            }
-            0xEA => {
-                write!(self.log_file, "NOP").unwrap();
-                Ok(2)
-            }
-            0xF0 => {
-                let operand = self.get_operand_relative(bus)?;
-                write!(self.log_file, "BEQ {}", operand).unwrap();
-                Ok(self.beq(operand)?)
-            }
+            0x18 => Ok(Opcode {
+                mnemonic: "CLC",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::clc,
+            }),
+            0x10 => Ok(Opcode {
+                mnemonic: "BPL",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bpl,
+            }),
+            0x20 => Ok(Opcode {
+                mnemonic: "JSR",
+                mode: AddressMode::ABSOLUTE,
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::jsr,
+            }),
+            0x24 => Ok(Opcode {
+                mnemonic: "BIT",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bit,
+            }),
+            0x38 => Ok(Opcode {
+                mnemonic: "SEC",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::sec,
+            }),
+            0x4C => Ok(Opcode {
+                mnemonic: "JMP",
+                mode: AddressMode::ABSOLUTE,
+                num_bytes: 3,
+                cycles: 3,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::jmp,
+            }),
+            0x50 => Ok(Opcode {
+                mnemonic: "BVC",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bvc,
+            }),
+            0x70 => Ok(Opcode {
+                mnemonic: "BVS",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bvs,
+            }),
+            0x85 => Ok(Opcode {
+                mnemonic: "STA",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sta,
+            }),
+            0x86 => Ok(Opcode {
+                mnemonic: "STX",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::stx,
+            }),
+            0x90 => Ok(Opcode {
+                mnemonic: "BCC",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bcc,
+            }),
+            0xA2 => Ok(Opcode {
+                mnemonic: "LDX",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ldx,
+            }),
+            0xA9 => Ok(Opcode {
+                mnemonic: "LDA",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::lda,
+            }),
+            0xB0 => Ok(Opcode {
+                mnemonic: "BCS",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bcs,
+            }),
+            0xD0 => Ok(Opcode {
+                mnemonic: "BNE",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bne,
+            }),
+            0xEA => Ok(Opcode {
+                mnemonic: "NOP",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::nop,
+            }),
+            0xF0 => Ok(Opcode {
+                mnemonic: "BEQ",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::beq,
+            }),
             _ => Err("Invalid opcode"),
         }
     }
 
-    fn get_operand_immediate<T: Bus>(&mut self, bus: &mut T) -> Result<Operand, &'static str> {
-        let byte = bus.read_byte(self.registers.program_counter)?;
-        self.registers.program_counter += 1;
-        write!(self.log_file, "{:02X}    ", byte).unwrap();
-        Ok(Operand::IMMEDIATE(byte))
+    fn write_opcode(&mut self, opcode: &Opcode, bus: &BusImpl) {
+        for i in 0..opcode.num_bytes as usize {
+            write!(self.log_file, " {:02X}", opcode.bytes[i]).unwrap();
+        }
+
+        // TODO: Quick and dirty, this was dumb. Do it better at some point
+        for i in (opcode.num_bytes + 1) as usize..4 {
+            let spaces = if i == 3 { "   " } else { "    " };
+            write!(self.log_file, "{}", spaces).unwrap();
+        }
+
+        write!(self.log_file, " {} ", opcode.mnemonic).unwrap();
+
+        match opcode.mode {
+            AddressMode::IMPLIED => {}
+            AddressMode::IMMEDIATE => write!(self.log_file, "#${:02X}", opcode.bytes[1]).unwrap(),
+            AddressMode::ABSOLUTE => write!(
+                self.log_file,
+                "${:02X}",
+                u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap())
+            )
+            .unwrap(),
+            AddressMode::RELATIVE => write!(
+                self.log_file,
+                "${:02X}",
+                opcode.bytes[1] as usize + self.registers.program_counter
+            )
+            .unwrap(),
+            AddressMode::ZEROPAGE => {
+                let address_value = bus.read_byte(opcode.bytes[1] as usize).unwrap();
+                write!(
+                    self.log_file,
+                    "${:02X} = {:02X}",
+                    opcode.bytes[1], address_value
+                )
+                .unwrap();
+            }
+        }
     }
 
-    fn get_operand_zeropage<T: Bus>(&mut self, bus: &mut T) -> Result<Operand, &'static str> {
-        let operand = bus.read_byte(self.registers.program_counter)?;
-        self.registers.program_counter += 1;
-        write!(self.log_file, "{:02X}    ", operand).unwrap();
-        let old_byte = bus.read_byte(operand as usize)?;
-        Ok(Operand::ZEROPAGE { operand, old_byte })
+    pub fn execute_opcode<'a>(
+        &'a mut self,
+        opcode: u8,
+        bus: &'a mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let opcode = self.lookup_opcode(opcode, bus)?;
+        self.write_opcode(&opcode, bus);
+
+        let addr = self.fetch_operand_address(&opcode);
+        (opcode.execute)(self, addr, opcode.cycles, bus)
     }
 
-    fn get_operand_absolute<T: Bus>(&mut self, bus: &mut T) -> Result<Operand, &'static str> {
-        let mut bytes = [0u8; 2];
-        bus.read_exact(self.registers.program_counter, &mut bytes)?;
+    fn fetch_zero_more_bytes(&mut self, opcode: u8) -> [u8; 3] {
+        [opcode, 0x0, 0x0]
+    }
+
+    fn fetch_one_more_bytes(
+        &mut self,
+        opcode: u8,
+        bus: &mut BusImpl,
+    ) -> Result<[u8; 3], &'static str> {
+        let bytes = [opcode, bus.read_byte(self.registers.program_counter)?, 0x0];
+        self.registers.program_counter += 1;
+        Ok(bytes)
+    }
+
+    fn fetch_two_more_bytes(
+        &mut self,
+        opcode: u8,
+        bus: &mut BusImpl,
+    ) -> Result<[u8; 3], &'static str> {
+        let mut bytes = [opcode, 0x0, 0x0];
+        bus.read_exact(self.registers.program_counter, &mut bytes[1..])?;
         self.registers.program_counter += 2;
-        write!(self.log_file, "{:02X} {:02X} ", bytes[0], bytes[1]).unwrap();
-        Ok(Operand::ABSOLUTE(u16::from_le_bytes(bytes)))
+        Ok(bytes)
     }
 
-    fn get_operand_relative<T: Bus>(&mut self, bus: &mut T) -> Result<Operand, &'static str> {
-        let byte = bus.read_byte(self.registers.program_counter)?;
-        self.registers.program_counter += 1;
-        write!(self.log_file, "{:02X}    ", byte).unwrap();
-        Ok(Operand::RELATIVE {
-            operand: byte,
-            program_counter: self.registers.program_counter,
-        })
-    }
-
-    fn jmp(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        match operand {
-            Operand::ABSOLUTE(addr) => {
-                self.registers.program_counter = addr as usize;
-                Ok(3)
+    fn fetch_operand_address(&mut self, opcode: &Opcode) -> usize {
+        match opcode.mode {
+            AddressMode::IMPLIED => 0x0, // Address is irrelevant for implied
+            AddressMode::IMMEDIATE => self.registers.program_counter - 1,
+            AddressMode::ABSOLUTE => {
+                u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize
             }
-            _ => Err("Unsupported instruction occured"),
+            AddressMode::RELATIVE => opcode.bytes[1] as usize + self.registers.program_counter,
+            AddressMode::ZEROPAGE => opcode.bytes[1] as usize,
         }
     }
 
-    fn jsr<T: Bus>(&mut self, operand: Operand, bus: &mut T) -> Result<u8, &'static str> {
-        match operand {
-            Operand::ABSOLUTE(addr) => {
-                self.push_stack(&u16::to_le_bytes(addr), bus)?;
-                self.registers.program_counter = addr as usize;
-                Ok(6)
-            }
-            _ => Err("Unsupported instruction occured"),
-        }
+    fn nop(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        Ok(start_cycles)
     }
 
-    fn ldx(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        match operand {
-            Operand::IMMEDIATE(val) => {
-                self.registers.x_reg = val;
-                self.set_zero_flag_if(val == 0);
-                self.set_neg_flag_if(val.bit(7));
-                Ok(2)
-            }
-            _ => Err("Unsupported instruction occured"),
-        }
-    }
-
-    fn lda(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        match operand {
-            Operand::IMMEDIATE(val) => {
-                self.registers.accumulator = val;
-                self.set_zero_flag_if(val == 0);
-                self.set_neg_flag_if(val.bit(7));
-                Ok(2)
-            }
-            _ => Err("Unsupported instruction occured"),
-        }
-    }
-
-    fn stx<T: Bus>(&mut self, operand: Operand, bus: &mut T) -> Result<u8, &'static str> {
-        match operand {
-            Operand::ZEROPAGE { operand, .. } => {
-                bus.write_byte(operand as usize, self.registers.x_reg)?;
-                Ok(3)
-            }
-            _ => Err("Unsupported instruction occured"),
-        }
-    }
-
-    fn sta<T: Bus>(&mut self, operand: Operand, bus: &mut T) -> Result<u8, &'static str> {
-        match operand {
-            Operand::ZEROPAGE { operand, .. } => {
-                bus.write_byte(operand as usize, self.registers.accumulator)?;
-                Ok(3)
-            }
-            _ => Err("Unsupported instruction occured"),
-        }
-    }
-
-    fn sec(&mut self) -> u8 {
-        self.registers.status_register.modify(Status::CARRY::SET);
-        2
-    }
-
-    fn clc(&mut self) -> u8 {
+    fn clc(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::CARRY::CLEAR);
-        2
+        Ok(start_cycles)
     }
 
-    fn bcs(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        self.branchif(operand, true, Status::CARRY)
+    fn sec(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.status_register.modify(Status::CARRY::SET);
+        Ok(start_cycles)
     }
 
-    fn bcc(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        self.branchif(operand, false, Status::CARRY)
+    fn jsr(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.push_stack(&u16::to_le_bytes(addr as u16), bus)?;
+        self.registers.program_counter = addr;
+        Ok(start_cycles)
     }
 
-    fn beq(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        self.branchif(operand, true, Status::ZERO)
+    fn bit(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let byte = bus.read_byte(addr)?;
+        self.set_zero_flag_if(byte & self.registers.accumulator == 0);
+        self.set_overflow_flag_if(byte.bit(6));
+        self.set_neg_flag_if(byte.bit(7));
+        Ok(start_cycles)
     }
 
-    fn bne(&mut self, operand: Operand) -> Result<u8, &'static str> {
-        self.branchif(operand, false, Status::ZERO)
+    fn sta(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        bus.write_byte(addr, self.registers.accumulator)?;
+        Ok(start_cycles)
+    }
+
+    fn stx(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        bus.write_byte(addr as usize, self.registers.x_reg)?;
+        Ok(start_cycles)
+    }
+
+    fn ldx(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let byte = bus.read_byte(addr)?;
+        self.registers.x_reg = byte;
+        self.set_zero_flag_if(byte == 0);
+        self.set_neg_flag_if(byte.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn lda(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let byte = bus.read_byte(addr)?;
+        self.registers.accumulator = byte;
+        self.set_zero_flag_if(byte == 0);
+        self.set_neg_flag_if(byte.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn bcc(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, start_cycles, Status::CARRY)
+    }
+
+    fn bcs(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, start_cycles, Status::CARRY)
+    }
+
+    fn beq(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, start_cycles, Status::ZERO)
+    }
+
+    fn bne(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, start_cycles, Status::ZERO)
+    }
+
+    fn bvs(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, start_cycles, Status::OVERFLOW)
+    }
+
+    fn bvc(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, start_cycles, Status::OVERFLOW)
+    }
+
+    fn bpl(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, start_cycles, Status::NEGATIVE)
     }
 
     fn branchif(
         &mut self,
-        operand: Operand,
+        addr: usize,
         set: bool,
+        mut cycle_count: u8,
         flag: Field<u8, Register>,
     ) -> Result<u8, &'static str> {
-        match operand {
-            Operand::RELATIVE {
-                operand,
-                program_counter,
-            } => {
-                let check = if set {
-                    self.registers.status_register.is_set(flag)
-                } else {
-                    !self.registers.status_register.is_set(flag)
-                };
+        let check = if set {
+            self.registers.status_register.is_set(flag)
+        } else {
+            !self.registers.status_register.is_set(flag)
+        };
 
-                let mut cycle_count = 2;
-                if check {
-                    cycle_count += 1;
-                    let new_addr = operand as usize + program_counter;
+        if check {
+            cycle_count += 1;
+            let new_addr = addr;
 
-                    if CPU::will_cross_boundary(new_addr, self.registers.program_counter) {
-                        cycle_count += 1;
-                    }
-
-                    self.registers.program_counter = new_addr;
-                }
-
-                Ok(cycle_count)
+            if CPU::will_cross_boundary(new_addr, self.registers.program_counter) {
+                cycle_count += 1;
             }
-            _ => Err("Unsupported instruction occured"),
+
+            self.registers.program_counter = new_addr;
         }
+
+        Ok(cycle_count)
+    }
+
+    fn jmp(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.registers.program_counter = addr as usize;
+        Ok(start_cycles)
     }
 }
