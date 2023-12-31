@@ -202,6 +202,30 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::stx,
             }),
+            0x88 => Ok(Opcode {
+                mnemonic: "DEY",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::dey,
+            }),
+            0x8A => Ok(Opcode {
+                mnemonic: "TXA",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::txa,
+            }),
+            0x8E => Ok(Opcode {
+                mnemonic: "STX",
+                mode: AddressMode::ABSOLUTE,
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::stx,
+            }),
             0x90 => Ok(Opcode {
                 mnemonic: "BCC",
                 mode: AddressMode::RELATIVE,
@@ -209,6 +233,22 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bcc,
+            }),
+            0x98 => Ok(Opcode {
+                mnemonic: "TYA",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::tya,
+            }),
+            0x9A => Ok(Opcode {
+                mnemonic: "TXS",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::txs,
             }),
             0xA0 => Ok(Opcode {
                 mnemonic: "LDY",
@@ -226,6 +266,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::ldx,
             }),
+            0xA8 => Ok(Opcode {
+                mnemonic: "TAY",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::tay,
+            }),
             0xA9 => Ok(Opcode {
                 mnemonic: "LDA",
                 mode: AddressMode::IMMEDIATE,
@@ -233,6 +281,30 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::lda,
+            }),
+            0xAA => Ok(Opcode {
+                mnemonic: "TAX",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::tax,
+            }),
+            0xAD => Ok(Opcode {
+                mnemonic: "LDA",
+                mode: AddressMode::ABSOLUTE,
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::lda,
+            }),
+            0xAE => Ok(Opcode {
+                mnemonic: "LDX",
+                mode: AddressMode::ABSOLUTE,
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::ldx,
             }),
             0xB0 => Ok(Opcode {
                 mnemonic: "BCS",
@@ -249,6 +321,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::clv,
+            }),
+            0xBA => Ok(Opcode {
+                mnemonic: "TSX",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::tsx,
             }),
             0xC0 => Ok(Opcode {
                 mnemonic: "CPY",
@@ -273,6 +353,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::cmp,
+            }),
+            0xCA => Ok(Opcode {
+                mnemonic: "DEX",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::dex,
             }),
             0xD0 => Ok(Opcode {
                 mnemonic: "BNE",
@@ -688,15 +776,71 @@ impl CPU {
         Ok(start_cycles)
     }
 
-    fn iny(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
-        self.registers.y_reg += 1;
+    fn tay(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.y_reg = self.registers.accumulator;
         self.set_flag_bit_if(1, self.registers.y_reg == 0);
+        self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn tya(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.accumulator = self.registers.y_reg;
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn tax(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.accumulator;
+        self.set_flag_bit_if(1, self.registers.x_reg == 0);
+        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn txa(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.accumulator = self.registers.x_reg;
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn tsx(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.stack_ptr as u8;
+        self.set_flag_bit_if(1, self.registers.x_reg == 0);
+        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn txs(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.stack_ptr = self.registers.x_reg as usize;
+        Ok(start_cycles)
+    }
+
+    fn iny(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.y_reg = self.registers.y_reg.wrapping_add(1);
+        self.set_flag_bit_if(1, self.registers.y_reg == 0);
+        self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn dey(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.y_reg = self.registers.y_reg.wrapping_sub(1);
+        self.set_flag_bit_if(1, self.registers.y_reg == 0);
+        self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
         Ok(start_cycles)
     }
 
     fn inx(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
-        self.registers.x_reg += 1;
+        self.registers.x_reg = self.registers.x_reg.wrapping_add(1);
         self.set_flag_bit_if(1, self.registers.x_reg == 0);
+        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn dex(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.x_reg.wrapping_sub(1);
+        self.set_flag_bit_if(1, self.registers.x_reg == 0);
+        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
         Ok(start_cycles)
     }
 
@@ -706,7 +850,10 @@ impl CPU {
         start_cycles: u8,
         bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
-        bus.write_byte(addr, bus.read_byte(addr)? + 1)?;
+        let new_byte = bus.read_byte(addr)?.wrapping_add(1);
+        bus.write_byte(addr, new_byte)?;
+        self.set_flag_bit_if(1, new_byte == 0);
+        self.set_flag_bit_if(7, new_byte.bit(7));
         Ok(start_cycles)
     }
 
