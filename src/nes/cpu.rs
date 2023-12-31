@@ -61,6 +61,8 @@ pub struct CPU {
 }
 
 impl CPU {
+    pub const PAGE_SZ_MASK: usize = 0xFF00;
+
     pub fn new<T: Bus>(bus: &T) -> Result<Self, &'static str> {
         // Get start program counter
         let mut buf = [0u8; 2];
@@ -135,6 +137,10 @@ impl CPU {
                 }
             }
         }
+    }
+
+    pub fn will_cross_boundary(old_pc: usize, new_pc: usize) -> bool {
+        new_pc & CPU::PAGE_SZ_MASK != old_pc & CPU::PAGE_SZ_MASK
     }
 }
 
