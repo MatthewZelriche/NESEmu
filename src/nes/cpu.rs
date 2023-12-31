@@ -142,6 +142,23 @@ impl CPU {
     pub fn will_cross_boundary(old_pc: usize, new_pc: usize) -> bool {
         new_pc & CPU::PAGE_SZ_MASK != old_pc & CPU::PAGE_SZ_MASK
     }
+
+    pub fn set_zero_flag_if(&mut self, predicate: bool) {
+        if predicate {
+            self.registers.status_register.modify(Status::ZERO::SET)
+        } else {
+            self.registers.status_register.modify(Status::ZERO::CLEAR)
+        };
+    }
+    pub fn set_neg_flag_if(&mut self, predicate: bool) {
+        if predicate {
+            self.registers.status_register.modify(Status::NEGATIVE::SET)
+        } else {
+            self.registers
+                .status_register
+                .modify(Status::NEGATIVE::CLEAR)
+        };
+    }
 }
 
 impl Clone for CPURegisters {

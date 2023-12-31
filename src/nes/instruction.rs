@@ -171,12 +171,8 @@ impl CPU {
         match operand {
             Operand::IMMEDIATE(val) => {
                 self.registers.x_reg = val;
-                if val == 0 {
-                    self.registers.status_register.modify(Status::ZERO::SET);
-                }
-                if val.bit(7) {
-                    self.registers.status_register.modify(Status::NEGATIVE::SET);
-                }
+                self.set_zero_flag_if(val == 0);
+                self.set_neg_flag_if(val.bit(7));
                 Ok(2)
             }
             _ => Err("Unsupported instruction occured"),
@@ -186,20 +182,9 @@ impl CPU {
     fn lda(&mut self, operand: Operand) -> Result<u8, &'static str> {
         match operand {
             Operand::IMMEDIATE(val) => {
-                let zero_flag = if val == 0 {
-                    Status::ZERO::SET
-                } else {
-                    Status::ZERO::CLEAR
-                };
-                let negative_flag = if val.bit(7) {
-                    Status::NEGATIVE::SET
-                } else {
-                    Status::NEGATIVE::CLEAR
-                };
-
                 self.registers.accumulator = val;
-                self.registers.status_register.modify(zero_flag);
-                self.registers.status_register.modify(negative_flag);
+                self.set_zero_flag_if(val == 0);
+                self.set_neg_flag_if(val.bit(7));
                 Ok(2)
             }
             _ => Err("Unsupported instruction occured"),
