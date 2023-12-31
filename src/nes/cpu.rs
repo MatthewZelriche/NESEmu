@@ -4,8 +4,9 @@ use std::{
     io::Write,
 };
 
+use bitfield::BitMut;
 use tock_registers::{
-    interfaces::{ReadWriteable, Readable},
+    interfaces::{ReadWriteable, Readable, Writeable},
     register_bitfields,
     registers::InMemoryRegister,
 };
@@ -155,30 +156,10 @@ impl CPU {
         new_pc & CPU::PAGE_SZ_MASK != old_pc & CPU::PAGE_SZ_MASK
     }
 
-    pub fn set_zero_flag_if(&mut self, predicate: bool) {
-        if predicate {
-            self.registers.status_register.modify(Status::ZERO::SET)
-        } else {
-            self.registers.status_register.modify(Status::ZERO::CLEAR)
-        };
-    }
-    pub fn set_overflow_flag_if(&mut self, predicate: bool) {
-        if predicate {
-            self.registers.status_register.modify(Status::OVERFLOW::SET)
-        } else {
-            self.registers
-                .status_register
-                .modify(Status::OVERFLOW::CLEAR)
-        };
-    }
-    pub fn set_neg_flag_if(&mut self, predicate: bool) {
-        if predicate {
-            self.registers.status_register.modify(Status::NEGATIVE::SET)
-        } else {
-            self.registers
-                .status_register
-                .modify(Status::NEGATIVE::CLEAR)
-        };
+    pub fn set_flag_bit_if(&mut self, bit_pos: u8, predicate: bool) {
+        let mut new = self.registers.status_register.get();
+        new.set_bit(bit_pos.into(), predicate);
+        self.registers.status_register.set(new);
     }
 }
 

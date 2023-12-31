@@ -1,9 +1,9 @@
 use std::io::Write;
 
-use bitfield::Bit;
+use bitfield::{Bit, BitMut};
 use tock_registers::{
     fields::Field,
-    interfaces::{ReadWriteable, Readable},
+    interfaces::{ReadWriteable, Readable, Writeable},
 };
 
 use super::{
@@ -42,6 +42,22 @@ impl CPU {
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::clc,
             }),
+            0x08 => Ok(Opcode {
+                mnemonic: "PHP",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 3,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::php,
+            }),
+            0x09 => Ok(Opcode {
+                mnemonic: "ORA",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ora,
+            }),
             0x10 => Ok(Opcode {
                 mnemonic: "BPL",
                 mode: AddressMode::RELATIVE,
@@ -66,6 +82,30 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bit,
             }),
+            0x28 => Ok(Opcode {
+                mnemonic: "PLP",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 4,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::plp,
+            }),
+            0x29 => Ok(Opcode {
+                mnemonic: "AND",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::and,
+            }),
+            0x30 => Ok(Opcode {
+                mnemonic: "BMI",
+                mode: AddressMode::RELATIVE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::bmi,
+            }),
             0x38 => Ok(Opcode {
                 mnemonic: "SEC",
                 mode: AddressMode::IMPLIED,
@@ -74,6 +114,14 @@ impl CPU {
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::sec,
             }),
+            0x49 => Ok(Opcode {
+                mnemonic: "EOR",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::eor,
+            }),
             0x4C => Ok(Opcode {
                 mnemonic: "JMP",
                 mode: AddressMode::ABSOLUTE,
@@ -81,6 +129,14 @@ impl CPU {
                 cycles: 3,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
                 execute: CPU::jmp,
+            }),
+            0x48 => Ok(Opcode {
+                mnemonic: "PHA",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 3,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::pha,
             }),
             0x50 => Ok(Opcode {
                 mnemonic: "BVC",
@@ -97,6 +153,22 @@ impl CPU {
                 cycles: 6,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::rts,
+            }),
+            0x68 => Ok(Opcode {
+                mnemonic: "PLA",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 4,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::pla,
+            }),
+            0x69 => Ok(Opcode {
+                mnemonic: "ADC",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::adc,
             }),
             0x70 => Ok(Opcode {
                 mnemonic: "BVS",
@@ -138,6 +210,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bcc,
             }),
+            0xA0 => Ok(Opcode {
+                mnemonic: "LDY",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ldy,
+            }),
             0xA2 => Ok(Opcode {
                 mnemonic: "LDX",
                 mode: AddressMode::IMMEDIATE,
@@ -162,6 +242,38 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bcs,
             }),
+            0xB8 => Ok(Opcode {
+                mnemonic: "CLV",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::clv,
+            }),
+            0xC0 => Ok(Opcode {
+                mnemonic: "CPY",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cpy,
+            }),
+            0xC8 => Ok(Opcode {
+                mnemonic: "INY",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::iny,
+            }),
+            0xC9 => Ok(Opcode {
+                mnemonic: "CMP",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cmp,
+            }),
             0xD0 => Ok(Opcode {
                 mnemonic: "BNE",
                 mode: AddressMode::RELATIVE,
@@ -169,6 +281,46 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bne,
+            }),
+            0xD8 => Ok(Opcode {
+                mnemonic: "CLD",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::cld,
+            }),
+            0xE0 => Ok(Opcode {
+                mnemonic: "CPX",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cpx,
+            }),
+            0xE6 => Ok(Opcode {
+                mnemonic: "INC",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::inc,
+            }),
+            0xE8 => Ok(Opcode {
+                mnemonic: "INX",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::inx,
+            }),
+            0xE9 => Ok(Opcode {
+                mnemonic: "SBC",
+                mode: AddressMode::IMMEDIATE,
+                num_bytes: 2,
+                cycles: 2,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sbc,
             }),
             0xEA => Ok(Opcode {
                 mnemonic: "NOP",
@@ -287,6 +439,87 @@ impl CPU {
         }
     }
 
+    fn sbc(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let old_accumulator = self.registers.accumulator;
+        let mut mem = bus.read_byte(addr)?;
+        mem ^= 0xFF; // Only difference from ADC is that we xor the memory byte thanks to two's complement
+        let val16bit: u16 = self.registers.accumulator as u16
+            + mem as u16
+            + self.registers.status_register.is_set(Status::CARRY) as u16;
+        self.registers.accumulator = (val16bit & 0xFF) as u8; // Drop the 8th bit
+        self.set_flag_bit_if(0, val16bit.bit(8));
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(
+            6,
+            ((val16bit ^ old_accumulator as u16) & (val16bit ^ mem as u16)).bit(7),
+        );
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+
+        Ok(start_cycles)
+    }
+
+    fn adc(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let old_accumulator = self.registers.accumulator;
+        let mem = bus.read_byte(addr)?;
+        let val16bit: u16 = self.registers.accumulator as u16
+            + mem as u16
+            + self.registers.status_register.is_set(Status::CARRY) as u16;
+        self.registers.accumulator = (val16bit & 0xFF) as u8; // Drop the 8th bit
+        self.set_flag_bit_if(0, val16bit.bit(8));
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(
+            6,
+            ((val16bit ^ old_accumulator as u16) & (val16bit ^ mem as u16)).bit(7),
+        );
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+
+        Ok(start_cycles)
+    }
+
+    fn plp(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        let mut byte = [0u8];
+        self.pop_stack(&mut byte, bus)?;
+        byte[0].set_bit(4, self.registers.status_register.is_set(Status::BFLAG)); // Ignore value of BFLAG in stack
+        byte[0].set_bit(5, true); // Unused bit must always be set
+        self.registers.status_register.set(byte[0]);
+        Ok(start_cycles)
+    }
+
+    fn pla(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        let mut byte = [0u8];
+        self.pop_stack(&mut byte, bus)?;
+        self.registers.accumulator = byte[0];
+        self.set_flag_bit_if(1, byte[0] == 0);
+        self.set_flag_bit_if(7, byte[0].bit(7));
+        Ok(start_cycles)
+    }
+
+    fn php(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        // Instructions that push status flags to the stack always push BFLAG as set
+        let mut copy = self.registers.status_register.extract();
+        copy.modify(Status::BFLAG::SET);
+
+        let byte = [copy.get()];
+        self.push_stack(&byte, bus)?;
+        Ok(start_cycles)
+    }
+
+    fn pha(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        let byte = [self.registers.accumulator];
+        self.push_stack(&byte, bus)?;
+        Ok(start_cycles)
+    }
+
     fn nop(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
         Ok(start_cycles)
     }
@@ -308,8 +541,58 @@ impl CPU {
         Ok(start_cycles)
     }
 
+    fn clv(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::OVERFLOW::CLEAR);
+        Ok(start_cycles)
+    }
+
+    fn cld(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::DECIMAL::CLEAR);
+        Ok(start_cycles)
+    }
+
     fn sec(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::CARRY::SET);
+        Ok(start_cycles)
+    }
+
+    fn and(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.registers.accumulator &= bus.read_byte(addr)?;
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn ora(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.registers.accumulator |= bus.read_byte(addr)?;
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn eor(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.registers.accumulator ^= bus.read_byte(addr)?;
+        self.set_flag_bit_if(1, self.registers.accumulator == 0);
+        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
         Ok(start_cycles)
     }
 
@@ -343,9 +626,73 @@ impl CPU {
         bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
-        self.set_zero_flag_if(byte & self.registers.accumulator == 0);
-        self.set_overflow_flag_if(byte.bit(6));
-        self.set_neg_flag_if(byte.bit(7));
+        self.set_flag_bit_if(1, self.registers.accumulator & byte == 0);
+        self.set_flag_bit_if(6, byte.bit(6));
+        self.set_flag_bit_if(7, byte.bit(7));
+
+        Ok(start_cycles)
+    }
+
+    fn cmp(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.accumulator, start_cycles, bus)
+    }
+
+    fn cpy(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.y_reg, start_cycles, bus)
+    }
+
+    fn cpx(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.x_reg, start_cycles, bus)
+    }
+
+    fn compare_reg(
+        &mut self,
+        addr: usize,
+        reg_val: u8,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let byte = bus.read_byte(addr)?;
+        self.set_flag_bit_if(0, reg_val >= byte);
+        self.set_flag_bit_if(1, reg_val == byte);
+        self.set_flag_bit_if(7, reg_val.wrapping_sub(byte).bit(7));
+        Ok(start_cycles)
+    }
+
+    fn iny(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.y_reg += 1;
+        self.set_flag_bit_if(1, self.registers.y_reg == 0);
+        Ok(start_cycles)
+    }
+
+    fn inx(&mut self, _: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.registers.x_reg += 1;
+        self.set_flag_bit_if(1, self.registers.x_reg == 0);
+        Ok(start_cycles)
+    }
+
+    fn inc(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        bus.write_byte(addr, bus.read_byte(addr)? + 1)?;
         Ok(start_cycles)
     }
 
@@ -369,6 +716,19 @@ impl CPU {
         Ok(start_cycles)
     }
 
+    fn ldy(
+        &mut self,
+        addr: usize,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let byte = bus.read_byte(addr)?;
+        self.registers.y_reg = byte;
+        self.set_flag_bit_if(1, byte == 0);
+        self.set_flag_bit_if(7, byte.bit(7));
+        Ok(start_cycles)
+    }
+
     fn ldx(
         &mut self,
         addr: usize,
@@ -377,8 +737,8 @@ impl CPU {
     ) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.registers.x_reg = byte;
-        self.set_zero_flag_if(byte == 0);
-        self.set_neg_flag_if(byte.bit(7));
+        self.set_flag_bit_if(1, byte == 0);
+        self.set_flag_bit_if(7, byte.bit(7));
         Ok(start_cycles)
     }
 
@@ -390,8 +750,8 @@ impl CPU {
     ) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.registers.accumulator = byte;
-        self.set_zero_flag_if(byte == 0);
-        self.set_neg_flag_if(byte.bit(7));
+        self.set_flag_bit_if(1, byte == 0);
+        self.set_flag_bit_if(7, byte.bit(7));
         Ok(start_cycles)
     }
 
@@ -423,6 +783,10 @@ impl CPU {
         self.branchif(addr, false, start_cycles, Status::NEGATIVE)
     }
 
+    fn bmi(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, start_cycles, Status::NEGATIVE)
+    }
+
     fn branchif(
         &mut self,
         addr: usize,
@@ -450,12 +814,7 @@ impl CPU {
         Ok(cycle_count)
     }
 
-    fn jmp(
-        &mut self,
-        addr: usize,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn jmp(&mut self, addr: usize, start_cycles: u8, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.program_counter = addr as usize;
         Ok(start_cycles)
     }
