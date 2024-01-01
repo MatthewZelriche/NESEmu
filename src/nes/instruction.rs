@@ -3,7 +3,7 @@ use std::io::Write;
 use bitfield::{Bit, BitMut};
 use tock_registers::{
     fields::Field,
-    interfaces::{ReadWriteable, Readable, Writeable},
+    interfaces::{ReadWriteable, Readable},
 };
 
 use super::{
@@ -20,6 +20,8 @@ pub enum AddressMode {
     ABSOLUTE(bool),
     RELATIVE,
     ZEROPAGE,
+    ACCUMULATOR,
+    INDIRECTX,
 }
 
 pub struct Opcode {
@@ -58,6 +60,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::ora,
             }),
+            0x0A => Ok(Opcode {
+                mnemonic: "ASL",
+                mode: AddressMode::ACCUMULATOR,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::asl,
+            }),
             0x10 => Ok(Opcode {
                 mnemonic: "BPL",
                 mode: AddressMode::RELATIVE,
@@ -89,6 +99,14 @@ impl CPU {
                 cycles: 4,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::plp,
+            }),
+            0x2A => Ok(Opcode {
+                mnemonic: "ROL",
+                mode: AddressMode::ACCUMULATOR,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::rol,
             }),
             0x29 => Ok(Opcode {
                 mnemonic: "AND",
@@ -129,6 +147,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::eor,
+            }),
+            0x4A => Ok(Opcode {
+                mnemonic: "LSR",
+                mode: AddressMode::ACCUMULATOR,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::lsr,
             }),
             0x4C => Ok(Opcode {
                 mnemonic: "JMP",
@@ -178,6 +204,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::adc,
             }),
+            0x6A => Ok(Opcode {
+                mnemonic: "ROR",
+                mode: AddressMode::ACCUMULATOR,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::ror,
+            }),
             0x70 => Ok(Opcode {
                 mnemonic: "BVS",
                 mode: AddressMode::RELATIVE,
@@ -226,6 +260,14 @@ impl CPU {
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::txa,
             }),
+            0x8D => Ok(Opcode {
+                mnemonic: "STA",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::sta,
+            }),
             0x8E => Ok(Opcode {
                 mnemonic: "STX",
                 mode: AddressMode::ABSOLUTE(true),
@@ -266,6 +308,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::ldy,
             }),
+            0xA1 => Ok(Opcode {
+                mnemonic: "LDA",
+                mode: AddressMode::INDIRECTX,
+                num_bytes: 2,
+                cycles: 6,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::lda,
+            }),
             0xA2 => Ok(Opcode {
                 mnemonic: "LDX",
                 mode: AddressMode::IMMEDIATE,
@@ -273,6 +323,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::ldx,
+            }),
+            0xA5 => Ok(Opcode {
+                mnemonic: "LDA",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::lda,
             }),
             0xA8 => Ok(Opcode {
                 mnemonic: "TAY",
@@ -446,12 +504,18 @@ impl CPU {
         }
     }
 
-    fn write_opcode(&mut self, opcode: &Opcode, bus: &BusImpl) {
+    fn write_opcode(&mut self, opcode: &Opcode, bus: &mut BusImpl) {
         let mut fmt_string = String::new();
 
         if opcode.num_bytes == 1 {
-            // The only instruction mode that supports 1 byte is implied...
             fmt_string = format!("{:02X}{:<8}{} ", opcode.bytes[0], "", opcode.mnemonic);
+
+            match opcode.mode {
+                AddressMode::ACCUMULATOR => {
+                    fmt_string = format!("{}A ", fmt_string);
+                }
+                _ => {}
+            }
         } else if opcode.num_bytes == 2 {
             fmt_string = format!(
                 "{:02X} {:02X}{:<5}{} ",
@@ -474,6 +538,18 @@ impl CPU {
                     fmt_string = format!(
                         "{}${:02X} = {:02X}",
                         fmt_string, opcode.bytes[1], address_value
+                    );
+                }
+                AddressMode::INDIRECTX => {
+                    let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg);
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    fmt_string = format!(
+                        "{}(${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        lsb_addr,
+                        addr,
+                        bus.read_byte(addr).unwrap()
                     );
                 }
                 _ => {} // should never happen
@@ -510,7 +586,7 @@ impl CPU {
         let opcode = self.lookup_opcode(opcode, bus)?;
         self.write_opcode(&opcode, bus);
 
-        let addr = self.fetch_operand_address(&opcode);
+        let addr = self.fetch_operand_address(&opcode, bus);
         (opcode.execute)(self, addr, opcode.mode, opcode.cycles, bus)
     }
 
@@ -539,15 +615,26 @@ impl CPU {
         Ok(bytes)
     }
 
-    fn fetch_operand_address(&mut self, opcode: &Opcode) -> usize {
+    fn fetch_operand_address(&mut self, opcode: &Opcode, bus: &mut BusImpl) -> usize {
         match opcode.mode {
-            AddressMode::IMPLIED => 0x0, // Address is irrelevant for implied
+            AddressMode::IMPLIED | AddressMode::ACCUMULATOR => 0x0, // Address is irrelevant for implied and ACC
             AddressMode::IMMEDIATE => self.registers.program_counter - 1,
             AddressMode::ABSOLUTE(_) => {
                 u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize
             }
             AddressMode::RELATIVE => opcode.bytes[1] as usize + self.registers.program_counter,
             AddressMode::ZEROPAGE => opcode.bytes[1] as usize,
+            AddressMode::INDIRECTX => {
+                // Indirect zeropage is tricky, because if we are given a lsb of 0xFF,
+                // we need to discover the high byte at 0x00, not 0x100
+                let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg) as usize;
+                let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
+                let addr_bytes = [
+                    bus.read_byte(lsb_addr).unwrap(),
+                    bus.read_byte(msb_addr).unwrap(),
+                ];
+                u16::from_le_bytes(addr_bytes) as usize
+            }
         }
     }
 
@@ -1088,6 +1175,93 @@ impl CPU {
         self.registers.accumulator = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
+        Ok(start_cycles)
+    }
+
+    fn lsr(
+        &mut self,
+        _: usize,
+        mode: AddressMode,
+        start_cycles: u8,
+        _: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        match mode {
+            AddressMode::ACCUMULATOR => {
+                self.set_flag_bit_if(0, self.registers.accumulator.bit(0));
+                self.registers.accumulator = self.registers.accumulator >> 1;
+                self.set_flag_bit_if(1, self.registers.accumulator == 0);
+                self.registers
+                    .status_register
+                    .modify(Status::NEGATIVE::CLEAR);
+            }
+            _ => todo!(),
+        }
+
+        Ok(start_cycles)
+    }
+
+    fn asl(
+        &mut self,
+        _: usize,
+        mode: AddressMode,
+        start_cycles: u8,
+        _: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        match mode {
+            AddressMode::ACCUMULATOR => {
+                self.set_flag_bit_if(0, self.registers.accumulator.bit(7));
+                self.registers.accumulator = self.registers.accumulator << 1;
+                self.set_flag_bit_if(1, self.registers.accumulator == 0);
+                self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+            }
+            _ => todo!(),
+        }
+        Ok(start_cycles)
+    }
+
+    fn ror(
+        &mut self,
+        _: usize,
+        mode: AddressMode,
+        start_cycles: u8,
+        _: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        match mode {
+            AddressMode::ACCUMULATOR => {
+                let new_carry = self.registers.accumulator.bit(0);
+                self.registers.accumulator = self.registers.accumulator >> 1;
+                self.registers
+                    .accumulator
+                    .set_bit(7, self.registers.status_register.is_set(Status::CARRY));
+                self.set_flag_bit_if(0, new_carry);
+                self.set_flag_bit_if(1, self.registers.accumulator == 0);
+                self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+            }
+            _ => todo!(),
+        }
+        Ok(start_cycles)
+    }
+
+    fn rol(
+        &mut self,
+        _: usize,
+        mode: AddressMode,
+        start_cycles: u8,
+        _: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        match mode {
+            AddressMode::ACCUMULATOR => {
+                let new_carry = self.registers.accumulator.bit(7);
+                self.registers.accumulator = self.registers.accumulator << 1;
+                self.registers
+                    .accumulator
+                    .set_bit(0, self.registers.status_register.is_set(Status::CARRY));
+                self.set_flag_bit_if(0, new_carry);
+                self.set_flag_bit_if(1, self.registers.accumulator == 0);
+                self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
+            }
+            _ => todo!(),
+        }
         Ok(start_cycles)
     }
 
