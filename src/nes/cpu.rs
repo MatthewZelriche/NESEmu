@@ -111,6 +111,12 @@ impl CPU {
         Ok(())
     }
 
+    pub fn set_status_register(&mut self, mut val: u8) {
+        val.set_bit(4, self.registers.status_register.is_set(Status::BFLAG)); // Ignore value of BFLAG in stack
+        val.set_bit(5, true); // Unused bit must always be set
+        self.registers.status_register.set(val);
+    }
+
     pub fn step(&mut self, bus: &mut BusImpl) {
         if self.cycles_remaining != 0 {
             self.cycles_remaining -= 1;

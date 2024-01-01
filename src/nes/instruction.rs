@@ -114,6 +114,14 @@ impl CPU {
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::sec,
             }),
+            0x40 => Ok(Opcode {
+                mnemonic: "RTI",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 6,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::rti,
+            }),
             0x49 => Ok(Opcode {
                 mnemonic: "EOR",
                 mode: AddressMode::IMMEDIATE,
@@ -543,6 +551,18 @@ impl CPU {
         }
     }
 
+    fn rti(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        let mut byte = [0];
+        self.pop_stack(&mut byte, bus)?;
+        self.set_status_register(byte[0]);
+
+        let mut pc = [0u8; 2];
+        self.pop_stack(&mut pc, bus)?;
+        self.registers.program_counter = u16::from_le_bytes(pc) as usize;
+
+        Ok(start_cycles)
+    }
+
     fn sbc(
         &mut self,
         addr: usize,
@@ -593,9 +613,7 @@ impl CPU {
     fn plp(&mut self, _: usize, start_cycles: u8, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let mut byte = [0u8];
         self.pop_stack(&mut byte, bus)?;
-        byte[0].set_bit(4, self.registers.status_register.is_set(Status::BFLAG)); // Ignore value of BFLAG in stack
-        byte[0].set_bit(5, true); // Unused bit must always be set
-        self.registers.status_register.set(byte[0]);
+        self.set_status_register(byte[0]);
         Ok(start_cycles)
     }
 
