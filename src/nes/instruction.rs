@@ -23,6 +23,8 @@ pub enum AddressMode {
     ACCUMULATOR,
     INDIRECTX,
     INDIRECTY,
+    ABSOLUTEX,
+    ABSOLUTEY,
 }
 
 pub struct Opcode {
@@ -31,7 +33,8 @@ pub struct Opcode {
     bytes: [u8; 3],
     num_bytes: u8,
     cycles: u8,
-    execute: fn(&mut CPU, usize, AddressMode, u8, &mut BusImpl) -> Result<u8, &'static str>,
+    execute:
+        for<'a> fn(&'a mut CPU, usize, &'a Opcode, &'a mut BusImpl) -> Result<u8, &'static str>,
 }
 
 impl CPU {
@@ -116,6 +119,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bpl,
+            }),
+            0x11 => Ok(Opcode {
+                mnemonic: "ORA",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ora,
             }),
             0x20 => Ok(Opcode {
                 mnemonic: "JSR",
@@ -213,6 +224,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bmi,
             }),
+            0x31 => Ok(Opcode {
+                mnemonic: "AND",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::and,
+            }),
             0x38 => Ok(Opcode {
                 mnemonic: "SEC",
                 mode: AddressMode::IMPLIED,
@@ -309,6 +328,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bvc,
             }),
+            0x51 => Ok(Opcode {
+                mnemonic: "EOR",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::eor,
+            }),
             0x60 => Ok(Opcode {
                 mnemonic: "RTS",
                 mode: AddressMode::IMPLIED,
@@ -388,6 +415,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bvs,
+            }),
+            0x71 => Ok(Opcode {
+                mnemonic: "ADC",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::adc,
             }),
             0x78 => Ok(Opcode {
                 mnemonic: "SEI",
@@ -476,6 +511,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bcc,
+            }),
+            0x91 => Ok(Opcode {
+                mnemonic: "STA",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 6,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sta,
             }),
             0x98 => Ok(Opcode {
                 mnemonic: "TYA",
@@ -717,6 +760,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bne,
             }),
+            0xD1 => Ok(Opcode {
+                mnemonic: "CMP",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cmp,
+            }),
             0xD8 => Ok(Opcode {
                 mnemonic: "CLD",
                 mode: AddressMode::IMPLIED,
@@ -820,6 +871,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::beq,
+            }),
+            0xF1 => Ok(Opcode {
+                mnemonic: "SBC",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sbc,
             }),
             0xF8 => Ok(Opcode {
                 mnemonic: "SED",
@@ -928,27 +987,35 @@ impl CPU {
         u16::from_le_bytes(addr_bytes) as usize
     }
 
+    pub fn adjust_cycles(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> u8 {
+        let mut cycles = opcode.cycles;
+        self.fetch_indirect_y_base_addr(opcode, bus);
+        match opcode.mode {
+            AddressMode::INDIRECTY => {
+                let base_addr = self.fetch_indirect_y_base_addr(opcode, bus);
+                if CPU::will_cross_boundary(base_addr, addr) {
+                    cycles += 1;
+                }
+            }
+            AddressMode::ABSOLUTEX => todo!(),
+            AddressMode::ABSOLUTEY => todo!(),
+            _ => {}
+        }
+
+        cycles
+    }
+
     pub fn execute_opcode<'a>(
         &'a mut self,
         opcode_val: u8,
         bus: &'a mut BusImpl,
     ) -> Result<u8, &'static str> {
-        let mut opcode = self.lookup_opcode(opcode_val, bus)?;
+        let opcode = self.lookup_opcode(opcode_val, bus)?;
         self.write_opcode(&opcode, bus);
 
         let addr = self.fetch_operand_address(&opcode, bus);
 
-        match opcode.mode {
-            AddressMode::INDIRECTY => {
-                let base_addr = self.fetch_indirect_y_base_addr(&opcode, bus);
-                if CPU::will_cross_boundary(base_addr, addr) {
-                    opcode.cycles += 1;
-                }
-            }
-            _ => {} // No cycle adjustment
-        }
-
-        (opcode.execute)(self, addr, opcode.mode, opcode.cycles, bus)
+        (opcode.execute)(self, addr, &opcode, bus)
     }
 
     fn fetch_zero_more_bytes(&mut self, opcode: u8) -> [u8; 3] {
@@ -1002,16 +1069,12 @@ impl CPU {
 
                 addr_indirect
             }
+            AddressMode::ABSOLUTEX => todo!(),
+            AddressMode::ABSOLUTEY => todo!(),
         }
     }
 
-    fn rti(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn rti(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let mut byte = [0];
         self.pop_stack(&mut byte, bus)?;
         self.set_status_register(byte[0]);
@@ -1020,16 +1083,10 @@ impl CPU {
         self.pop_stack(&mut pc, bus)?;
         self.registers.program_counter = u16::from_le_bytes(pc) as usize;
 
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn sbc(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn sbc(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let old_accumulator = self.registers.accumulator;
         let mut mem = bus.read_byte(addr)?;
         mem ^= 0xFF; // Only difference from ADC is that we xor the memory byte thanks to two's complement
@@ -1045,16 +1102,10 @@ impl CPU {
         );
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
 
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn adc(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn adc(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let old_accumulator = self.registers.accumulator;
         let mem = bus.read_byte(addr)?;
         let val16bit: u16 = self.registers.accumulator as u16
@@ -1069,193 +1120,103 @@ impl CPU {
         );
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
 
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn plp(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn plp(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let mut byte = [0u8];
         self.pop_stack(&mut byte, bus)?;
         self.set_status_register(byte[0]);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn pla(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn pla(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let mut byte = [0u8];
         self.pop_stack(&mut byte, bus)?;
         self.registers.accumulator = byte[0];
         self.set_flag_bit_if(1, byte[0] == 0);
         self.set_flag_bit_if(7, byte[0].bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn php(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn php(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         // Instructions that push status flags to the stack always push BFLAG as set
         let mut copy = self.registers.status_register.extract();
         copy.modify(Status::BFLAG::SET);
 
         let byte = [copy.get()];
         self.push_stack(&byte, bus)?;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn pha(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn pha(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let byte = [self.registers.accumulator];
         self.push_stack(&byte, bus)?;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn nop(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        Ok(start_cycles)
+    fn nop(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        Ok(opcode.cycles)
     }
 
-    fn clc(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn clc(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::CARRY::CLEAR);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn sei(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn sei(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers
             .status_register
             .modify(Status::INT_DISABLE::SET);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn sed(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn sed(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::DECIMAL::SET);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn clv(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn clv(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers
             .status_register
             .modify(Status::OVERFLOW::CLEAR);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn cld(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn cld(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers
             .status_register
             .modify(Status::DECIMAL::CLEAR);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn sec(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn sec(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::CARRY::SET);
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn and(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn and(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator &= bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn ora(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn ora(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator |= bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn eor(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn eor(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator ^= bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn jsr(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn jsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         // Store the current program counter (which, right now, points to the NEXT
         // instruction after the one we are processing)
         // big endian because we need to push to the stack in reverse order of how they should be
@@ -1264,320 +1225,176 @@ impl CPU {
             bus,
         )?;
         self.registers.program_counter = addr;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn rts(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn rts(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let mut addr_bytes = [0u8; 2];
         self.pop_stack(&mut addr_bytes, bus)?;
         self.registers.program_counter = (u16::from_le_bytes(addr_bytes) + 1) as usize;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn bit(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn bit(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator & byte == 0);
         self.set_flag_bit_if(6, byte.bit(6));
         self.set_flag_bit_if(7, byte.bit(7));
 
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn cmp(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.compare_reg(addr, self.registers.accumulator, start_cycles, bus)
+    fn cmp(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.accumulator, opcode, bus)
     }
 
-    fn cpy(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.compare_reg(addr, self.registers.y_reg, start_cycles, bus)
+    fn cpy(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.y_reg, opcode, bus)
     }
 
-    fn cpx(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.compare_reg(addr, self.registers.x_reg, start_cycles, bus)
+    fn cpx(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.x_reg, opcode, bus)
     }
 
     fn compare_reg(
         &mut self,
         addr: usize,
         reg_val: u8,
-        start_cycles: u8,
+        opcode: &Opcode,
         bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.set_flag_bit_if(0, reg_val >= byte);
         self.set_flag_bit_if(1, reg_val == byte);
         self.set_flag_bit_if(7, reg_val.wrapping_sub(byte).bit(7));
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn tay(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn tay(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.y_reg = self.registers.accumulator;
         self.set_flag_bit_if(1, self.registers.y_reg == 0);
         self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn tya(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn tya(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator = self.registers.y_reg;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn tax(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn tax(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.x_reg = self.registers.accumulator;
         self.set_flag_bit_if(1, self.registers.x_reg == 0);
         self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn txa(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn txa(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator = self.registers.x_reg;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn tsx(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn tsx(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.x_reg = self.registers.stack_ptr as u8;
         self.set_flag_bit_if(1, self.registers.x_reg == 0);
         self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn txs(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn txs(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.stack_ptr = self.registers.x_reg as usize;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn iny(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn iny(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.y_reg = self.registers.y_reg.wrapping_add(1);
         self.set_flag_bit_if(1, self.registers.y_reg == 0);
         self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn dey(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn dey(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.y_reg = self.registers.y_reg.wrapping_sub(1);
         self.set_flag_bit_if(1, self.registers.y_reg == 0);
         self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn inx(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn inx(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.x_reg = self.registers.x_reg.wrapping_add(1);
         self.set_flag_bit_if(1, self.registers.x_reg == 0);
         self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn dex(
-        &mut self,
-        _: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn dex(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.x_reg = self.registers.x_reg.wrapping_sub(1);
         self.set_flag_bit_if(1, self.registers.x_reg == 0);
         self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn inc(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn inc(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let new_byte = bus.read_byte(addr)?.wrapping_add(1);
         bus.write_byte(addr, new_byte)?;
         self.set_flag_bit_if(1, new_byte == 0);
         self.set_flag_bit_if(7, new_byte.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn dec(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn dec(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let new_byte = bus.read_byte(addr)?.wrapping_sub(1);
         bus.write_byte(addr, new_byte)?;
         self.set_flag_bit_if(1, new_byte == 0);
         self.set_flag_bit_if(7, new_byte.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn sta(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn sta(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         bus.write_byte(addr, self.registers.accumulator)?;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn stx(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn stx(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         bus.write_byte(addr as usize, self.registers.x_reg)?;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn sty(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn sty(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         bus.write_byte(addr as usize, self.registers.y_reg)?;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn ldy(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn ldy(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.registers.y_reg = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn ldx(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn ldx(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.registers.x_reg = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn lda(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn lda(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         let byte = bus.read_byte(addr)?;
         self.registers.accumulator = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
-        Ok(start_cycles)
+        Ok(self.adjust_cycles(addr, opcode, bus))
     }
 
-    fn lsr(
-        &mut self,
-        addr: usize,
-        mode: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        match mode {
+    fn lsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        match opcode.mode {
             AddressMode::ACCUMULATOR => {
                 self.set_flag_bit_if(0, self.registers.accumulator.bit(0));
                 self.registers.accumulator = self.registers.accumulator >> 1;
@@ -1598,17 +1415,11 @@ impl CPU {
             }
         }
 
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn asl(
-        &mut self,
-        addr: usize,
-        mode: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        match mode {
+    fn asl(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        match opcode.mode {
             AddressMode::ACCUMULATOR => {
                 self.set_flag_bit_if(0, self.registers.accumulator.bit(7));
                 self.registers.accumulator = self.registers.accumulator << 1;
@@ -1624,17 +1435,11 @@ impl CPU {
                 self.set_flag_bit_if(7, byte.bit(7));
             }
         }
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn ror(
-        &mut self,
-        addr: usize,
-        mode: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        match mode {
+    fn ror(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        match opcode.mode {
             AddressMode::ACCUMULATOR => {
                 let new_carry = self.registers.accumulator.bit(0);
                 self.registers.accumulator = self.registers.accumulator >> 1;
@@ -1656,17 +1461,11 @@ impl CPU {
                 self.set_flag_bit_if(7, byte.bit(7));
             }
         }
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn rol(
-        &mut self,
-        addr: usize,
-        mode: AddressMode,
-        start_cycles: u8,
-        bus: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        match mode {
+    fn rol(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
+        match opcode.mode {
             AddressMode::ACCUMULATOR => {
                 let new_carry = self.registers.accumulator.bit(7);
                 self.registers.accumulator = self.registers.accumulator << 1;
@@ -1688,87 +1487,39 @@ impl CPU {
                 self.set_flag_bit_if(7, byte.bit(7));
             }
         }
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 
-    fn bcc(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, false, start_cycles, Status::CARRY)
+    fn bcc(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::CARRY)
     }
 
-    fn bcs(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, true, start_cycles, Status::CARRY)
+    fn bcs(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::CARRY)
     }
 
-    fn beq(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, true, start_cycles, Status::ZERO)
+    fn beq(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::ZERO)
     }
 
-    fn bne(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, false, start_cycles, Status::ZERO)
+    fn bne(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::ZERO)
     }
 
-    fn bvs(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, true, start_cycles, Status::OVERFLOW)
+    fn bvs(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::OVERFLOW)
     }
 
-    fn bvc(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, false, start_cycles, Status::OVERFLOW)
+    fn bvc(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::OVERFLOW)
     }
 
-    fn bpl(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, false, start_cycles, Status::NEGATIVE)
+    fn bpl(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::NEGATIVE)
     }
 
-    fn bmi(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
-        self.branchif(addr, true, start_cycles, Status::NEGATIVE)
+    fn bmi(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::NEGATIVE)
     }
 
     fn branchif(
@@ -1798,14 +1549,8 @@ impl CPU {
         Ok(cycle_count)
     }
 
-    fn jmp(
-        &mut self,
-        addr: usize,
-        _: AddressMode,
-        start_cycles: u8,
-        _: &mut BusImpl,
-    ) -> Result<u8, &'static str> {
+    fn jmp(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.program_counter = addr as usize;
-        Ok(start_cycles)
+        Ok(opcode.cycles)
     }
 }
