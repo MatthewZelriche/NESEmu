@@ -44,6 +44,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::ora,
             }),
+            0x05 => Ok(Opcode {
+                mnemonic: "ORA",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ora,
+            }),
             0x18 => Ok(Opcode {
                 mnemonic: "CLC",
                 mode: AddressMode::IMPLIED,
@@ -51,6 +59,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::clc,
+            }),
+            0x06 => Ok(Opcode {
+                mnemonic: "ASL",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::asl,
             }),
             0x08 => Ok(Opcode {
                 mnemonic: "PHP",
@@ -74,6 +90,22 @@ impl CPU {
                 num_bytes: 1,
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::asl,
+            }),
+            0x0D => Ok(Opcode {
+                mnemonic: "ORA",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::ora,
+            }),
+            0x0E => Ok(Opcode {
+                mnemonic: "ASL",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
                 execute: CPU::asl,
             }),
             0x10 => Ok(Opcode {
@@ -108,6 +140,22 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bit,
             }),
+            0x25 => Ok(Opcode {
+                mnemonic: "AND",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::and,
+            }),
+            0x26 => Ok(Opcode {
+                mnemonic: "ROL",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::rol,
+            }),
             0x28 => Ok(Opcode {
                 mnemonic: "PLP",
                 mode: AddressMode::IMPLIED,
@@ -131,6 +179,30 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::and,
+            }),
+            0x2C => Ok(Opcode {
+                mnemonic: "BIT",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::bit,
+            }),
+            0x2D => Ok(Opcode {
+                mnemonic: "AND",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::and,
+            }),
+            0x2E => Ok(Opcode {
+                mnemonic: "ROL",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::rol,
             }),
             0x30 => Ok(Opcode {
                 mnemonic: "BMI",
@@ -164,6 +236,22 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::eor,
             }),
+            0x45 => Ok(Opcode {
+                mnemonic: "EOR",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::eor,
+            }),
+            0x46 => Ok(Opcode {
+                mnemonic: "LSR",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::lsr,
+            }),
             0x49 => Ok(Opcode {
                 mnemonic: "EOR",
                 mode: AddressMode::IMMEDIATE,
@@ -187,6 +275,22 @@ impl CPU {
                 cycles: 3,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
                 execute: CPU::jmp,
+            }),
+            0x4D => Ok(Opcode {
+                mnemonic: "EOR",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::eor,
+            }),
+            0x4E => Ok(Opcode {
+                mnemonic: "LSR",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::lsr,
             }),
             0x48 => Ok(Opcode {
                 mnemonic: "PHA",
@@ -220,6 +324,22 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::adc,
             }),
+            0x65 => Ok(Opcode {
+                mnemonic: "ADC",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::adc,
+            }),
+            0x66 => Ok(Opcode {
+                mnemonic: "ROR",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ror,
+            }),
             0x68 => Ok(Opcode {
                 mnemonic: "PLA",
                 mode: AddressMode::IMPLIED,
@@ -242,6 +362,22 @@ impl CPU {
                 num_bytes: 1,
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::ror,
+            }),
+            0x6D => Ok(Opcode {
+                mnemonic: "ADC",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::adc,
+            }),
+            0x6E => Ok(Opcode {
+                mnemonic: "ROR",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
                 execute: CPU::ror,
             }),
             0x70 => Ok(Opcode {
@@ -267,6 +403,14 @@ impl CPU {
                 cycles: 6,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::sta,
+            }),
+            0x84 => Ok(Opcode {
+                mnemonic: "STY",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sty,
             }),
             0x85 => Ok(Opcode {
                 mnemonic: "STA",
@@ -299,6 +443,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::txa,
+            }),
+            0x8C => Ok(Opcode {
+                mnemonic: "STY",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::sty,
             }),
             0x8D => Ok(Opcode {
                 mnemonic: "STA",
@@ -380,6 +532,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::lda,
             }),
+            0xA6 => Ok(Opcode {
+                mnemonic: "LDX",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::ldx,
+            }),
             0xA8 => Ok(Opcode {
                 mnemonic: "TAY",
                 mode: AddressMode::IMPLIED,
@@ -403,6 +563,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::tax,
+            }),
+            0xAC => Ok(Opcode {
+                mnemonic: "LDY",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::ldy,
             }),
             0xAD => Ok(Opcode {
                 mnemonic: "LDA",
@@ -460,6 +628,30 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::cmp,
             }),
+            0xC4 => Ok(Opcode {
+                mnemonic: "CPY",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cpy,
+            }),
+            0xC5 => Ok(Opcode {
+                mnemonic: "CMP",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cmp,
+            }),
+            0xC6 => Ok(Opcode {
+                mnemonic: "DEC",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::dec,
+            }),
             0xC8 => Ok(Opcode {
                 mnemonic: "INY",
                 mode: AddressMode::IMPLIED,
@@ -483,6 +675,30 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::dex,
+            }),
+            0xCC => Ok(Opcode {
+                mnemonic: "CPY",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::cpy,
+            }),
+            0xCD => Ok(Opcode {
+                mnemonic: "CMP",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::cmp,
+            }),
+            0xCE => Ok(Opcode {
+                mnemonic: "DEC",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::dec,
             }),
             0xD0 => Ok(Opcode {
                 mnemonic: "BNE",
@@ -516,12 +732,28 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::sbc,
             }),
+            0xE4 => Ok(Opcode {
+                mnemonic: "CPX",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::cpx,
+            }),
+            0xE5 => Ok(Opcode {
+                mnemonic: "SBC",
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 3,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sbc,
+            }),
             0xE6 => Ok(Opcode {
                 mnemonic: "INC",
-                mode: AddressMode::IMPLIED,
-                num_bytes: 1,
-                cycles: 2,
-                bytes: self.fetch_zero_more_bytes(opcode),
+                mode: AddressMode::ZEROPAGE,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::inc,
             }),
             0xE8 => Ok(Opcode {
@@ -547,6 +779,30 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::nop,
+            }),
+            0xEC => Ok(Opcode {
+                mnemonic: "CPX",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::cpx,
+            }),
+            0xED => Ok(Opcode {
+                mnemonic: "SBC",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::sbc,
+            }),
+            0xEE => Ok(Opcode {
+                mnemonic: "INC",
+                mode: AddressMode::ABSOLUTE(true),
+                num_bytes: 3,
+                cycles: 6,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::inc,
             }),
             0xF0 => Ok(Opcode {
                 mnemonic: "BEQ",
@@ -1178,6 +1434,20 @@ impl CPU {
         Ok(start_cycles)
     }
 
+    fn dec(
+        &mut self,
+        addr: usize,
+        _: AddressMode,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let new_byte = bus.read_byte(addr)?.wrapping_sub(1);
+        bus.write_byte(addr, new_byte)?;
+        self.set_flag_bit_if(1, new_byte == 0);
+        self.set_flag_bit_if(7, new_byte.bit(7));
+        Ok(start_cycles)
+    }
+
     fn sta(
         &mut self,
         addr: usize,
@@ -1197,6 +1467,17 @@ impl CPU {
         bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         bus.write_byte(addr as usize, self.registers.x_reg)?;
+        Ok(start_cycles)
+    }
+
+    fn sty(
+        &mut self,
+        addr: usize,
+        _: AddressMode,
+        start_cycles: u8,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        bus.write_byte(addr as usize, self.registers.y_reg)?;
         Ok(start_cycles)
     }
 
@@ -1244,10 +1525,10 @@ impl CPU {
 
     fn lsr(
         &mut self,
-        _: usize,
+        addr: usize,
         mode: AddressMode,
         start_cycles: u8,
-        _: &mut BusImpl,
+        bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         match mode {
             AddressMode::ACCUMULATOR => {
@@ -1258,7 +1539,16 @@ impl CPU {
                     .status_register
                     .modify(Status::NEGATIVE::CLEAR);
             }
-            _ => todo!(),
+            _ => {
+                let mut byte = bus.read_byte(addr)?;
+                self.set_flag_bit_if(0, byte.bit(0));
+                byte = byte >> 1;
+                bus.write_byte(addr, byte)?;
+                self.set_flag_bit_if(1, byte == 0);
+                self.registers
+                    .status_register
+                    .modify(Status::NEGATIVE::CLEAR);
+            }
         }
 
         Ok(start_cycles)
@@ -1266,10 +1556,10 @@ impl CPU {
 
     fn asl(
         &mut self,
-        _: usize,
+        addr: usize,
         mode: AddressMode,
         start_cycles: u8,
-        _: &mut BusImpl,
+        bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         match mode {
             AddressMode::ACCUMULATOR => {
@@ -1278,17 +1568,24 @@ impl CPU {
                 self.set_flag_bit_if(1, self.registers.accumulator == 0);
                 self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
             }
-            _ => todo!(),
+            _ => {
+                let mut byte = bus.read_byte(addr)?;
+                self.set_flag_bit_if(0, byte.bit(7));
+                byte = byte << 1;
+                bus.write_byte(addr, byte)?;
+                self.set_flag_bit_if(1, byte == 0);
+                self.set_flag_bit_if(7, byte.bit(7));
+            }
         }
         Ok(start_cycles)
     }
 
     fn ror(
         &mut self,
-        _: usize,
+        addr: usize,
         mode: AddressMode,
         start_cycles: u8,
-        _: &mut BusImpl,
+        bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         match mode {
             AddressMode::ACCUMULATOR => {
@@ -1301,17 +1598,26 @@ impl CPU {
                 self.set_flag_bit_if(1, self.registers.accumulator == 0);
                 self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
             }
-            _ => todo!(),
+            _ => {
+                let mut byte = bus.read_byte(addr)?;
+                let new_carry = byte.bit(0);
+                byte = byte >> 1;
+                byte.set_bit(7, self.registers.status_register.is_set(Status::CARRY));
+                bus.write_byte(addr, byte)?;
+                self.set_flag_bit_if(0, new_carry);
+                self.set_flag_bit_if(1, byte == 0);
+                self.set_flag_bit_if(7, byte.bit(7));
+            }
         }
         Ok(start_cycles)
     }
 
     fn rol(
         &mut self,
-        _: usize,
+        addr: usize,
         mode: AddressMode,
         start_cycles: u8,
-        _: &mut BusImpl,
+        bus: &mut BusImpl,
     ) -> Result<u8, &'static str> {
         match mode {
             AddressMode::ACCUMULATOR => {
@@ -1324,7 +1630,16 @@ impl CPU {
                 self.set_flag_bit_if(1, self.registers.accumulator == 0);
                 self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
             }
-            _ => todo!(),
+            _ => {
+                let mut byte = bus.read_byte(addr)?;
+                let new_carry = byte.bit(7);
+                byte = byte << 1;
+                byte.set_bit(0, self.registers.status_register.is_set(Status::CARRY));
+                bus.write_byte(addr, byte)?;
+                self.set_flag_bit_if(0, new_carry);
+                self.set_flag_bit_if(1, byte == 0);
+                self.set_flag_bit_if(7, byte.bit(7));
+            }
         }
         Ok(start_cycles)
     }
