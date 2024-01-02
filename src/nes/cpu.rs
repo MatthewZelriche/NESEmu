@@ -132,7 +132,7 @@ impl CPU {
             let opcode_addr = self.registers.program_counter;
             let opcode = bus.read_byte(opcode_addr).unwrap_or(0x0);
             self.registers.program_counter += 1;
-            write!(self.log_file, "{:X}  ", opcode_addr).unwrap();
+            write!(self.log_file, "{:04X}  ", opcode_addr).unwrap();
 
             match self.execute_opcode(opcode, bus) {
                 Ok(cycle_count) => {
