@@ -20,6 +20,8 @@ pub enum AddressMode {
     ABSOLUTE(bool),
     RELATIVE,
     ZEROPAGE,
+    ZEROPAGEX,
+    ZEROPAGEY,
     ACCUMULATOR,
     INDIRECTX,
     INDIRECTY,
@@ -957,13 +959,33 @@ impl CPU {
                         bus.read_byte(addr).unwrap()
                     );
                 }
-                AddressMode::INDIRECTY | AddressMode::INDIRECTX => {
+                AddressMode::INDIRECTY => {
                     let addr = self.fetch_operand_address(opcode, bus);
                     fmt_string = format!(
                         "{}(${:02X}),Y = {:04X} @ {:04X} = {:02X}",
                         fmt_string,
                         opcode.bytes[1],
                         self.fetch_indirect_y_base_addr(opcode, bus),
+                        addr,
+                        bus.read_byte(addr).unwrap()
+                    );
+                }
+                AddressMode::ZEROPAGEX => {
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    fmt_string = format!(
+                        "{}${:02X},X @ {:02X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        addr,
+                        bus.read_byte(addr).unwrap()
+                    );
+                }
+                AddressMode::ZEROPAGEY => {
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    fmt_string = format!(
+                        "{}${:02X},Y @ {:02X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
                         addr,
                         bus.read_byte(addr).unwrap()
                     );
@@ -1117,6 +1139,14 @@ impl CPU {
                     bus.read_byte(base_addr_msb).unwrap(),
                 ];
                 u16::from_le_bytes(addr_bytes) as usize
+            }
+            AddressMode::ZEROPAGEX => {
+                let base_addr = opcode.bytes[1];
+                base_addr.wrapping_add(self.registers.x_reg) as usize
+            }
+            AddressMode::ZEROPAGEY => {
+                let base_addr = opcode.bytes[1];
+                base_addr.wrapping_add(self.registers.y_reg) as usize
             }
         }
     }
