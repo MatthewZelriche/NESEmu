@@ -27,33 +27,6 @@ register_bitfields!(
     ]
 );
 
-pub struct CPURegisters {
-    pub accumulator: u8,
-    pub x_reg: u8,
-    pub y_reg: u8,
-    pub stack_ptr: usize,
-    pub program_counter: usize,
-    pub status_register: InMemoryRegister<u8, Status::Register>,
-}
-
-pub struct OptionalFile(Option<File>);
-
-// This impl cannot fail
-impl Write for OptionalFile {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Some(file) = self.0.as_mut() {
-            let _ = write!(file, "{}", std::str::from_utf8(buf).unwrap()); // Don't care if fails...
-            return Ok(buf.len());
-        }
-
-        Ok(0)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 pub struct CPU {
     pub registers: CPURegisters,
     pub old_register_state: CPURegisters, // State for the CPU at the end of the PREVIOUS instruction
@@ -154,6 +127,15 @@ impl CPU {
     }
 }
 
+pub struct CPURegisters {
+    pub accumulator: u8,
+    pub x_reg: u8,
+    pub y_reg: u8,
+    pub stack_ptr: usize,
+    pub program_counter: usize,
+    pub status_register: InMemoryRegister<u8, Status::Register>,
+}
+
 impl Clone for CPURegisters {
     fn clone(&self) -> Self {
         Self {
@@ -191,5 +173,21 @@ impl Display for CPURegisters {
             self.status_register.get(),
             self.stack_ptr
         )
+    }
+}
+
+pub struct OptionalFile(Option<File>);
+impl Write for OptionalFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(file) = self.0.as_mut() {
+            write!(file, "{}", std::str::from_utf8(buf).unwrap())?;
+            return Ok(buf.len());
+        }
+
+        Ok(0)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }

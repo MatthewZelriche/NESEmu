@@ -1240,182 +1240,16 @@ impl CPU {
         }
     }
 
-    fn write_opcode(&mut self, opcode: &Opcode, bus: &mut BusImpl) {
-        let mut fmt_string = format!("{:04X}  ", self.current_instruction_addr);
-
-        if opcode.num_bytes == 1 {
-            fmt_string = format!(
-                "{}{:02X}{:<8}{} ",
-                fmt_string, opcode.bytes[0], "", opcode.mnemonic
-            );
-
-            match opcode.mode {
-                AddressMode::ACCUMULATOR => {
-                    fmt_string = format!("{}A ", fmt_string);
-                }
-                _ => {}
-            }
-        } else if opcode.num_bytes == 2 {
-            fmt_string = format!(
-                "{}{:02X} {:02X}{:<5}{} ",
-                fmt_string, opcode.bytes[0], opcode.bytes[1], "", opcode.mnemonic
-            );
-
-            match opcode.mode {
-                AddressMode::IMMEDIATE => {
-                    fmt_string = format!("{}#${:02X}", fmt_string, opcode.bytes[1]);
-                }
-                AddressMode::RELATIVE => {
-                    fmt_string = format!(
-                        "{}${:02X}",
-                        fmt_string,
-                        opcode.bytes[1] as usize + self.registers.program_counter
-                    );
-                }
-                AddressMode::ZEROPAGE => {
-                    let address_value = bus.read_byte(opcode.bytes[1] as usize).unwrap();
-                    fmt_string = format!(
-                        "{}${:02X} = {:02X}",
-                        fmt_string, opcode.bytes[1], address_value
-                    );
-                }
-                AddressMode::INDIRECTX => {
-                    let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg);
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    fmt_string = format!(
-                        "{}(${:02X},X) @ {:02X} = {:04X} = {:02X}",
-                        fmt_string,
-                        opcode.bytes[1],
-                        lsb_addr,
-                        addr,
-                        bus.read_byte(addr).unwrap()
-                    );
-                }
-                AddressMode::INDIRECTY => {
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    fmt_string = format!(
-                        "{}(${:02X}),Y = {:04X} @ {:04X} = {:02X}",
-                        fmt_string,
-                        opcode.bytes[1],
-                        self.fetch_indirect_y_base_addr(opcode, bus),
-                        addr,
-                        bus.read_byte(addr).unwrap()
-                    );
-                }
-                AddressMode::ZEROPAGEX => {
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    fmt_string = format!(
-                        "{}${:02X},X @ {:02X} = {:02X}",
-                        fmt_string,
-                        opcode.bytes[1],
-                        addr,
-                        bus.read_byte(addr).unwrap()
-                    );
-                }
-                AddressMode::ZEROPAGEY => {
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    fmt_string = format!(
-                        "{}${:02X},Y @ {:02X} = {:02X}",
-                        fmt_string,
-                        opcode.bytes[1],
-                        addr,
-                        bus.read_byte(addr).unwrap()
-                    );
-                }
-                _ => {} // should never happen
-            }
-        } else if opcode.num_bytes == 3 {
-            fmt_string = format!(
-                "{}{:02X} {:02X} {:02X}  {} ",
-                fmt_string, opcode.bytes[0], opcode.bytes[1], opcode.bytes[2], opcode.mnemonic
-            );
-
-            match opcode.mode {
-                AddressMode::ABSOLUTE(mem_modify) => {
-                    let operand = u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap());
-                    fmt_string = format!("{}${:04X}", fmt_string, operand);
-
-                    if mem_modify {
-                        let byte = bus.read_byte(operand as usize).unwrap();
-                        fmt_string = format!("{} = {:02X}", fmt_string, byte);
-                    }
-                }
-                AddressMode::INDIRECT => {
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    let base_addr = self.fetch_absolute_base_addr(opcode, bus);
-                    fmt_string = format!("{}(${:04X}) = {:04X}", fmt_string, base_addr, addr);
-                }
-                AddressMode::ABSOLUTEY => {
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    let base_addr = self.fetch_absolute_base_addr(opcode, bus);
-                    fmt_string = format!(
-                        "{}${:04X},Y @ {:04X} = {:02X}",
-                        fmt_string,
-                        base_addr,
-                        addr,
-                        bus.read_byte(addr).unwrap()
-                    );
-                }
-                AddressMode::ABSOLUTEX => {
-                    let addr = self.fetch_operand_address(opcode, bus);
-                    let base_addr = self.fetch_absolute_base_addr(opcode, bus);
-                    fmt_string = format!(
-                        "{}${:04X},X @ {:04X} = {:02X}",
-                        fmt_string,
-                        base_addr,
-                        addr,
-                        bus.read_byte(addr).unwrap()
-                    );
-                }
-
-                _ => {} // should never happen
-            }
-        }
-
-        fmt_string = format!("{:<42}", fmt_string);
-        fmt_string = format!(
-            "{}     {} CYC:{}",
-            fmt_string, self.old_register_state, self.total_cycles
-        );
-        write!(self.log_file, "{}\n", fmt_string).unwrap();
-        log::info!("{}", fmt_string);
-    }
-
-    pub fn fetch_indirect_y_base_addr(&self, opcode: &Opcode, bus: &mut BusImpl) -> usize {
-        let lsb_addr = opcode.bytes[1] as usize;
-        let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
-        let addr_bytes = [
-            bus.read_byte(lsb_addr).unwrap(),
-            bus.read_byte(msb_addr).unwrap(),
-        ];
-        u16::from_le_bytes(addr_bytes) as usize
-    }
-
-    pub fn adjust_cycles(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> u8 {
-        let mut cycles = opcode.cycles;
-        let base_addr = match opcode.mode {
-            AddressMode::INDIRECTY => self.fetch_indirect_y_base_addr(opcode, bus),
-            AddressMode::ABSOLUTEX => self.fetch_absolute_base_addr(opcode, bus),
-            AddressMode::ABSOLUTEY => self.fetch_absolute_base_addr(opcode, bus),
-            _ => return cycles,
-        };
-
-        if CPU::will_cross_boundary(base_addr, addr) {
-            cycles += 1;
-        }
-        cycles
-    }
-
     pub fn execute_opcode<'a>(
         &'a mut self,
         opcode_val: u8,
         bus: &'a mut BusImpl,
     ) -> Result<u8, &'static str> {
         let opcode = self.lookup_opcode(opcode_val, bus)?;
-        self.write_opcode(&opcode, bus);
+        // We don't care if this succeeds or not, since the logging info is optional
+        let _ = self.write_opcode(&opcode, bus);
 
-        let addr = self.fetch_operand_address(&opcode, bus);
-
+        let addr = self.fetch_operand_address(&opcode, bus)?;
         (opcode.execute)(self, addr, &opcode, bus)
     }
 
@@ -1444,63 +1278,90 @@ impl CPU {
         Ok(bytes)
     }
 
-    fn fetch_operand_address(&mut self, opcode: &Opcode, bus: &mut BusImpl) -> usize {
+    fn fetch_operand_address(
+        &mut self,
+        opcode: &Opcode,
+        bus: &mut BusImpl,
+    ) -> Result<usize, &'static str> {
         match opcode.mode {
-            AddressMode::IMPLIED | AddressMode::ACCUMULATOR => 0x0, // Address is irrelevant for implied and ACC
-            AddressMode::IMMEDIATE => self.registers.program_counter - 1,
+            AddressMode::IMPLIED | AddressMode::ACCUMULATOR => Ok(0x0), // Address is irrelevant for implied and ACC
+            AddressMode::IMMEDIATE => Ok(self.registers.program_counter - 1),
             AddressMode::ABSOLUTE(_) => {
-                u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize
+                Ok(u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize)
             }
-            AddressMode::RELATIVE => opcode.bytes[1] as usize + self.registers.program_counter,
-            AddressMode::ZEROPAGE => opcode.bytes[1] as usize,
+            AddressMode::RELATIVE => Ok(opcode.bytes[1] as usize + self.registers.program_counter),
+            AddressMode::ZEROPAGE => Ok(opcode.bytes[1] as usize),
             AddressMode::INDIRECTX => {
                 // Indirect zeropage is tricky, because if we are given a lsb of 0xFF,
                 // we need to discover the high byte at 0x00, not 0x100
                 let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg) as usize;
                 let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
-                let addr_bytes = [
-                    bus.read_byte(lsb_addr).unwrap(),
-                    bus.read_byte(msb_addr).unwrap(),
-                ];
-                u16::from_le_bytes(addr_bytes) as usize
+                let addr_bytes = [bus.read_byte(lsb_addr)?, bus.read_byte(msb_addr)?];
+                Ok(u16::from_le_bytes(addr_bytes) as usize)
             }
             AddressMode::INDIRECTY => {
-                let addr = self.fetch_indirect_y_base_addr(opcode, bus) as u16;
-                let addr_indirect = addr.wrapping_add(self.registers.y_reg as u16) as usize;
-
-                addr_indirect
+                let addr = self.fetch_indirect_y_base_addr(opcode, bus)? as u16;
+                Ok(addr.wrapping_add(self.registers.y_reg as u16) as usize)
             }
-            AddressMode::ABSOLUTEX => (self.fetch_absolute_base_addr(opcode, bus) as u16)
+            AddressMode::ABSOLUTEX => Ok((self.fetch_absolute_base_addr(opcode) as u16)
                 .wrapping_add(self.registers.x_reg as u16)
-                as usize,
-            AddressMode::ABSOLUTEY => (self.fetch_absolute_base_addr(opcode, bus) as u16)
+                as usize),
+            AddressMode::ABSOLUTEY => Ok((self.fetch_absolute_base_addr(opcode) as u16)
                 .wrapping_add(self.registers.y_reg as u16)
-                as usize,
+                as usize),
             AddressMode::INDIRECT => {
-                let base_addr = self.fetch_absolute_base_addr(opcode, bus);
+                let base_addr = self.fetch_absolute_base_addr(opcode);
                 // Have to emulate a cpu bug with indirect mode
                 let base_addr_msb_wrap = CPU::PAGE_SZ_MASK & base_addr;
                 let base_addr_msb =
                     (((base_addr + 1) % base_addr_msb_wrap) as u8) as usize | base_addr_msb_wrap;
-                let addr_bytes = [
-                    bus.read_byte(base_addr).unwrap(),
-                    bus.read_byte(base_addr_msb).unwrap(),
-                ];
-                u16::from_le_bytes(addr_bytes) as usize
+                let addr_bytes = [bus.read_byte(base_addr)?, bus.read_byte(base_addr_msb)?];
+                Ok(u16::from_le_bytes(addr_bytes) as usize)
             }
             AddressMode::ZEROPAGEX => {
                 let base_addr = opcode.bytes[1];
-                base_addr.wrapping_add(self.registers.x_reg) as usize
+                Ok(base_addr.wrapping_add(self.registers.x_reg) as usize)
             }
             AddressMode::ZEROPAGEY => {
                 let base_addr = opcode.bytes[1];
-                base_addr.wrapping_add(self.registers.y_reg) as usize
+                Ok(base_addr.wrapping_add(self.registers.y_reg) as usize)
             }
         }
     }
 
-    pub fn fetch_absolute_base_addr(&self, opcode: &Opcode, bus: &mut BusImpl) -> usize {
+    pub fn fetch_indirect_y_base_addr(
+        &self,
+        opcode: &Opcode,
+        bus: &mut BusImpl,
+    ) -> Result<usize, &'static str> {
+        let lsb_addr = opcode.bytes[1] as usize;
+        let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
+        let addr_bytes = [bus.read_byte(lsb_addr)?, bus.read_byte(msb_addr)?];
+        Ok(u16::from_le_bytes(addr_bytes) as usize)
+    }
+
+    pub fn fetch_absolute_base_addr(&self, opcode: &Opcode) -> usize {
         u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize
+    }
+
+    pub fn adjust_cycles(
+        &mut self,
+        addr: usize,
+        opcode: &Opcode,
+        bus: &mut BusImpl,
+    ) -> Result<u8, &'static str> {
+        let mut cycles = opcode.cycles;
+        let base_addr = match opcode.mode {
+            AddressMode::INDIRECTY => self.fetch_indirect_y_base_addr(opcode, bus)?,
+            AddressMode::ABSOLUTEX => self.fetch_absolute_base_addr(opcode),
+            AddressMode::ABSOLUTEY => self.fetch_absolute_base_addr(opcode),
+            _ => return Ok(cycles),
+        };
+
+        if CPU::will_cross_boundary(base_addr, addr) {
+            cycles += 1;
+        }
+        Ok(cycles)
     }
 
     fn rti(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1531,7 +1392,7 @@ impl CPU {
         );
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
 
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn adc(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1549,7 +1410,7 @@ impl CPU {
         );
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
 
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn plp(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1628,21 +1489,21 @@ impl CPU {
         self.registers.accumulator &= bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn ora(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator |= bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn eor(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.accumulator ^= bus.read_byte(addr)?;
         self.set_flag_bit_if(1, self.registers.accumulator == 0);
         self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn jsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1696,7 +1557,7 @@ impl CPU {
         self.set_flag_bit_if(0, reg_val >= byte);
         self.set_flag_bit_if(1, reg_val == byte);
         self.set_flag_bit_if(7, reg_val.wrapping_sub(byte).bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn tay(&mut self, _: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1803,7 +1664,7 @@ impl CPU {
         self.registers.y_reg = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn ldx(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1811,7 +1672,7 @@ impl CPU {
         self.registers.x_reg = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn lda(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1819,7 +1680,7 @@ impl CPU {
         self.registers.accumulator = byte;
         self.set_flag_bit_if(1, byte == 0);
         self.set_flag_bit_if(7, byte.bit(7));
-        Ok(self.adjust_cycles(addr, opcode, bus))
+        self.adjust_cycles(addr, opcode, bus)
     }
 
     fn lsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
@@ -1981,5 +1842,147 @@ impl CPU {
     fn jmp(&mut self, addr: usize, opcode: &Opcode, _: &mut BusImpl) -> Result<u8, &'static str> {
         self.registers.program_counter = addr as usize;
         Ok(opcode.cycles)
+    }
+
+    pub fn write_opcode(&mut self, opcode: &Opcode, bus: &mut BusImpl) -> Result<(), &'static str> {
+        let mut fmt_string = format!("{:04X}  ", self.current_instruction_addr);
+
+        if opcode.num_bytes == 1 {
+            fmt_string = format!(
+                "{}{:02X}{:<8}{} ",
+                fmt_string, opcode.bytes[0], "", opcode.mnemonic
+            );
+
+            match opcode.mode {
+                AddressMode::ACCUMULATOR => {
+                    fmt_string = format!("{}A ", fmt_string);
+                }
+                _ => {}
+            }
+        } else if opcode.num_bytes == 2 {
+            fmt_string = format!(
+                "{}{:02X} {:02X}{:<5}{} ",
+                fmt_string, opcode.bytes[0], opcode.bytes[1], "", opcode.mnemonic
+            );
+
+            match opcode.mode {
+                AddressMode::IMMEDIATE => {
+                    fmt_string = format!("{}#${:02X}", fmt_string, opcode.bytes[1]);
+                }
+                AddressMode::RELATIVE => {
+                    fmt_string = format!(
+                        "{}${:02X}",
+                        fmt_string,
+                        opcode.bytes[1] as usize + self.registers.program_counter
+                    );
+                }
+                AddressMode::ZEROPAGE => {
+                    let address_value = bus.read_byte(opcode.bytes[1] as usize)?;
+                    fmt_string = format!(
+                        "{}${:02X} = {:02X}",
+                        fmt_string, opcode.bytes[1], address_value
+                    );
+                }
+                AddressMode::INDIRECTX => {
+                    let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg);
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    fmt_string = format!(
+                        "{}(${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        lsb_addr,
+                        addr,
+                        bus.read_byte(addr)?
+                    );
+                }
+                AddressMode::INDIRECTY => {
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    fmt_string = format!(
+                        "{}(${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        self.fetch_indirect_y_base_addr(opcode, bus)?,
+                        addr,
+                        bus.read_byte(addr)?
+                    );
+                }
+                AddressMode::ZEROPAGEX => {
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    fmt_string = format!(
+                        "{}${:02X},X @ {:02X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        addr,
+                        bus.read_byte(addr)?
+                    );
+                }
+                AddressMode::ZEROPAGEY => {
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    fmt_string = format!(
+                        "{}${:02X},Y @ {:02X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        addr,
+                        bus.read_byte(addr)?
+                    );
+                }
+                _ => {} // should never happen
+            }
+        } else if opcode.num_bytes == 3 {
+            fmt_string = format!(
+                "{}{:02X} {:02X} {:02X}  {} ",
+                fmt_string, opcode.bytes[0], opcode.bytes[1], opcode.bytes[2], opcode.mnemonic
+            );
+
+            match opcode.mode {
+                AddressMode::ABSOLUTE(mem_modify) => {
+                    let operand = u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap());
+                    fmt_string = format!("{}${:04X}", fmt_string, operand);
+
+                    if mem_modify {
+                        let byte = bus.read_byte(operand as usize)?;
+                        fmt_string = format!("{} = {:02X}", fmt_string, byte);
+                    }
+                }
+                AddressMode::INDIRECT => {
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    let base_addr = self.fetch_absolute_base_addr(opcode);
+                    fmt_string = format!("{}(${:04X}) = {:04X}", fmt_string, base_addr, addr);
+                }
+                AddressMode::ABSOLUTEY => {
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    let base_addr = self.fetch_absolute_base_addr(opcode);
+                    fmt_string = format!(
+                        "{}${:04X},Y @ {:04X} = {:02X}",
+                        fmt_string,
+                        base_addr,
+                        addr,
+                        bus.read_byte(addr)?
+                    );
+                }
+                AddressMode::ABSOLUTEX => {
+                    let addr = self.fetch_operand_address(opcode, bus)?;
+                    let base_addr = self.fetch_absolute_base_addr(opcode);
+                    fmt_string = format!(
+                        "{}${:04X},X @ {:04X} = {:02X}",
+                        fmt_string,
+                        base_addr,
+                        addr,
+                        bus.read_byte(addr)?
+                    );
+                }
+
+                _ => {} // should never happen
+            }
+        }
+
+        fmt_string = format!("{:<42}", fmt_string);
+        fmt_string = format!(
+            "{}     {} CYC:{}",
+            fmt_string, self.old_register_state, self.total_cycles
+        );
+        write!(self.log_file, "{}\n", fmt_string).map_err(|_| "Failed to write to log file")?;
+        log::info!("{}", fmt_string);
+        Ok(())
     }
 }
