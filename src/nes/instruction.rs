@@ -665,6 +665,14 @@ impl CPU {
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::clv,
             }),
+            0xB9 => Ok(Opcode {
+                mnemonic: "LDA",
+                mode: AddressMode::ABSOLUTEY,
+                num_bytes: 3,
+                cycles: 4,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::lda,
+            }),
             0xBA => Ok(Opcode {
                 mnemonic: "TSX",
                 mode: AddressMode::IMPLIED,
@@ -949,7 +957,7 @@ impl CPU {
                         bus.read_byte(addr).unwrap()
                     );
                 }
-                AddressMode::INDIRECTY => {
+                AddressMode::INDIRECTY | AddressMode::INDIRECTX => {
                     let addr = self.fetch_operand_address(opcode, bus);
                     fmt_string = format!(
                         "{}(${:02X}),Y = {:04X} @ {:04X} = {:02X}",
@@ -980,9 +988,21 @@ impl CPU {
                 }
                 AddressMode::INDIRECT => {
                     let addr = self.fetch_operand_address(opcode, bus);
-                    let base_addr = u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize;
+                    let base_addr = self.fetch_absolute_base_addr(opcode, bus);
                     fmt_string = format!("{}(${:04X}) = {:04X}", fmt_string, base_addr, addr);
                 }
+                AddressMode::ABSOLUTEY | AddressMode::ABSOLUTEX => {
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    let base_addr = self.fetch_absolute_base_addr(opcode, bus);
+                    fmt_string = format!(
+                        "{}${:04X},Y @ {:04X} = {:02X}",
+                        fmt_string,
+                        base_addr,
+                        addr,
+                        bus.read_byte(addr).unwrap()
+                    );
+                }
+
                 _ => {} // should never happen
             }
         }
@@ -1003,19 +1023,16 @@ impl CPU {
 
     pub fn adjust_cycles(&mut self, addr: usize, opcode: &Opcode, bus: &mut BusImpl) -> u8 {
         let mut cycles = opcode.cycles;
-        self.fetch_indirect_y_base_addr(opcode, bus);
-        match opcode.mode {
-            AddressMode::INDIRECTY => {
-                let base_addr = self.fetch_indirect_y_base_addr(opcode, bus);
-                if CPU::will_cross_boundary(base_addr, addr) {
-                    cycles += 1;
-                }
-            }
-            AddressMode::ABSOLUTEX => todo!(),
-            AddressMode::ABSOLUTEY => todo!(),
-            _ => {}
-        }
+        let base_addr = match opcode.mode {
+            AddressMode::INDIRECTY => self.fetch_indirect_y_base_addr(opcode, bus),
+            AddressMode::ABSOLUTEX => self.fetch_absolute_base_addr(opcode, bus),
+            AddressMode::ABSOLUTEY => self.fetch_absolute_base_addr(opcode, bus),
+            _ => return cycles,
+        };
 
+        if CPU::will_cross_boundary(base_addr, addr) {
+            cycles += 1;
+        }
         cycles
     }
 
@@ -1083,10 +1100,14 @@ impl CPU {
 
                 addr_indirect
             }
-            AddressMode::ABSOLUTEX => todo!(),
-            AddressMode::ABSOLUTEY => todo!(),
+            AddressMode::ABSOLUTEX => (self.fetch_absolute_base_addr(opcode, bus) as u16)
+                .wrapping_add(self.registers.x_reg as u16)
+                as usize,
+            AddressMode::ABSOLUTEY => (self.fetch_absolute_base_addr(opcode, bus) as u16)
+                .wrapping_add(self.registers.y_reg as u16)
+                as usize,
             AddressMode::INDIRECT => {
-                let base_addr = u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize;
+                let base_addr = self.fetch_absolute_base_addr(opcode, bus);
                 // Have to emulate a cpu bug with indirect mode
                 let base_addr_msb_wrap = CPU::PAGE_SZ_MASK & base_addr;
                 let base_addr_msb =
@@ -1098,6 +1119,10 @@ impl CPU {
                 u16::from_le_bytes(addr_bytes) as usize
             }
         }
+    }
+
+    pub fn fetch_absolute_base_addr(&self, opcode: &Opcode, bus: &mut BusImpl) -> usize {
+        u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize
     }
 
     fn rti(&mut self, _: usize, opcode: &Opcode, bus: &mut BusImpl) -> Result<u8, &'static str> {
