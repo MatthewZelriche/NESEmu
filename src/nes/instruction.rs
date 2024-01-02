@@ -25,6 +25,7 @@ pub enum AddressMode {
     INDIRECTY,
     ABSOLUTEX,
     ABSOLUTEY,
+    INDIRECT,
 }
 
 pub struct Opcode {
@@ -391,6 +392,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::ror,
+            }),
+            0x6C => Ok(Opcode {
+                mnemonic: "JMP",
+                mode: AddressMode::INDIRECT,
+                num_bytes: 3,
+                cycles: 5,
+                bytes: self.fetch_two_more_bytes(opcode, bus)?,
+                execute: CPU::jmp,
             }),
             0x6D => Ok(Opcode {
                 mnemonic: "ADC",
@@ -969,6 +978,11 @@ impl CPU {
                         fmt_string = format!("{} = {:02X}", fmt_string, byte);
                     }
                 }
+                AddressMode::INDIRECT => {
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    let base_addr = u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize;
+                    fmt_string = format!("{}(${:04X}) = {:04X}", fmt_string, base_addr, addr);
+                }
                 _ => {} // should never happen
             }
         }
@@ -1071,6 +1085,18 @@ impl CPU {
             }
             AddressMode::ABSOLUTEX => todo!(),
             AddressMode::ABSOLUTEY => todo!(),
+            AddressMode::INDIRECT => {
+                let base_addr = u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize;
+                // Have to emulate a cpu bug with indirect mode
+                let base_addr_msb_wrap = CPU::PAGE_SZ_MASK & base_addr;
+                let base_addr_msb =
+                    (((base_addr + 1) % base_addr_msb_wrap) as u8) as usize | base_addr_msb_wrap;
+                let addr_bytes = [
+                    bus.read_byte(base_addr).unwrap(),
+                    bus.read_byte(base_addr_msb).unwrap(),
+                ];
+                u16::from_le_bytes(addr_bytes) as usize
+            }
         }
     }
 
