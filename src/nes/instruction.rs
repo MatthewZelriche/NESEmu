@@ -22,6 +22,7 @@ pub enum AddressMode {
     ZEROPAGE,
     ACCUMULATOR,
     INDIRECTX,
+    INDIRECTY,
 }
 
 pub struct Opcode {
@@ -596,6 +597,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::bcs,
             }),
+            0xB1 => Ok(Opcode {
+                mnemonic: "LDA",
+                mode: AddressMode::INDIRECTY,
+                num_bytes: 2,
+                cycles: 5,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::lda,
+            }),
             0xB8 => Ok(Opcode {
                 mnemonic: "CLV",
                 mode: AddressMode::IMPLIED,
@@ -872,6 +881,17 @@ impl CPU {
                         bus.read_byte(addr).unwrap()
                     );
                 }
+                AddressMode::INDIRECTY => {
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    fmt_string = format!(
+                        "{}(${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                        fmt_string,
+                        opcode.bytes[1],
+                        self.fetch_indirect_y_base_addr(opcode, bus),
+                        addr,
+                        bus.read_byte(addr).unwrap()
+                    );
+                }
                 _ => {} // should never happen
             }
         } else if opcode.num_bytes == 3 {
@@ -898,15 +918,36 @@ impl CPU {
         write!(self.log_file, "{}", fmt_string).unwrap();
     }
 
+    pub fn fetch_indirect_y_base_addr(&self, opcode: &Opcode, bus: &mut BusImpl) -> usize {
+        let lsb_addr = opcode.bytes[1] as usize;
+        let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
+        let addr_bytes = [
+            bus.read_byte(lsb_addr).unwrap(),
+            bus.read_byte(msb_addr).unwrap(),
+        ];
+        u16::from_le_bytes(addr_bytes) as usize
+    }
+
     pub fn execute_opcode<'a>(
         &'a mut self,
-        opcode: u8,
+        opcode_val: u8,
         bus: &'a mut BusImpl,
     ) -> Result<u8, &'static str> {
-        let opcode = self.lookup_opcode(opcode, bus)?;
+        let mut opcode = self.lookup_opcode(opcode_val, bus)?;
         self.write_opcode(&opcode, bus);
 
         let addr = self.fetch_operand_address(&opcode, bus);
+
+        match opcode.mode {
+            AddressMode::INDIRECTY => {
+                let base_addr = self.fetch_indirect_y_base_addr(&opcode, bus);
+                if CPU::will_cross_boundary(base_addr, addr) {
+                    opcode.cycles += 1;
+                }
+            }
+            _ => {} // No cycle adjustment
+        }
+
         (opcode.execute)(self, addr, opcode.mode, opcode.cycles, bus)
     }
 
@@ -954,6 +995,12 @@ impl CPU {
                     bus.read_byte(msb_addr).unwrap(),
                 ];
                 u16::from_le_bytes(addr_bytes) as usize
+            }
+            AddressMode::INDIRECTY => {
+                let addr = self.fetch_indirect_y_base_addr(opcode, bus) as u16;
+                let addr_indirect = addr.wrapping_add(self.registers.y_reg as u16) as usize;
+
+                addr_indirect
             }
         }
     }
