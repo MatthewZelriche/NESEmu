@@ -598,7 +598,7 @@ impl CPU {
             }),
             0x7E => Ok(Opcode {
                 mnemonic: "ROR",
-                mode: AddressMode::ABSOLUTE(true),
+                mode: AddressMode::ABSOLUTEX,
                 num_bytes: 3,
                 cycles: 7,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
@@ -692,6 +692,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::sta,
             }),
+            0x94 => Ok(Opcode {
+                mnemonic: "STY",
+                mode: AddressMode::ZEROPAGEX,
+                num_bytes: 2,
+                cycles: 4,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::sty,
+            }),
             0x95 => Ok(Opcode {
                 mnemonic: "STA",
                 mode: AddressMode::ZEROPAGEX,
@@ -699,6 +707,14 @@ impl CPU {
                 cycles: 4,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::sta,
+            }),
+            0x96 => Ok(Opcode {
+                mnemonic: "STX",
+                mode: AddressMode::ZEROPAGEY,
+                num_bytes: 2,
+                cycles: 4,
+                bytes: self.fetch_one_more_bytes(opcode, bus)?,
+                execute: CPU::stx,
             }),
             0x98 => Ok(Opcode {
                 mnemonic: "TYA",
@@ -1326,11 +1342,22 @@ impl CPU {
                     let base_addr = self.fetch_absolute_base_addr(opcode, bus);
                     fmt_string = format!("{}(${:04X}) = {:04X}", fmt_string, base_addr, addr);
                 }
-                AddressMode::ABSOLUTEY | AddressMode::ABSOLUTEX => {
+                AddressMode::ABSOLUTEY => {
                     let addr = self.fetch_operand_address(opcode, bus);
                     let base_addr = self.fetch_absolute_base_addr(opcode, bus);
                     fmt_string = format!(
                         "{}${:04X},Y @ {:04X} = {:02X}",
+                        fmt_string,
+                        base_addr,
+                        addr,
+                        bus.read_byte(addr).unwrap()
+                    );
+                }
+                AddressMode::ABSOLUTEX => {
+                    let addr = self.fetch_operand_address(opcode, bus);
+                    let base_addr = self.fetch_absolute_base_addr(opcode, bus);
+                    fmt_string = format!(
+                        "{}${:04X},X @ {:04X} = {:02X}",
                         fmt_string,
                         base_addr,
                         addr,
