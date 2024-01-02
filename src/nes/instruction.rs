@@ -1241,10 +1241,13 @@ impl CPU {
     }
 
     fn write_opcode(&mut self, opcode: &Opcode, bus: &mut BusImpl) {
-        let mut fmt_string = String::new();
+        let mut fmt_string = format!("{:04X}  ", self.current_instruction_addr);
 
         if opcode.num_bytes == 1 {
-            fmt_string = format!("{:02X}{:<8}{} ", opcode.bytes[0], "", opcode.mnemonic);
+            fmt_string = format!(
+                "{}{:02X}{:<8}{} ",
+                fmt_string, opcode.bytes[0], "", opcode.mnemonic
+            );
 
             match opcode.mode {
                 AddressMode::ACCUMULATOR => {
@@ -1254,8 +1257,8 @@ impl CPU {
             }
         } else if opcode.num_bytes == 2 {
             fmt_string = format!(
-                "{:02X} {:02X}{:<5}{} ",
-                opcode.bytes[0], opcode.bytes[1], "", opcode.mnemonic
+                "{}{:02X} {:02X}{:<5}{} ",
+                fmt_string, opcode.bytes[0], opcode.bytes[1], "", opcode.mnemonic
             );
 
             match opcode.mode {
@@ -1323,8 +1326,8 @@ impl CPU {
             }
         } else if opcode.num_bytes == 3 {
             fmt_string = format!(
-                "{:02X} {:02X} {:02X}  {} ",
-                opcode.bytes[0], opcode.bytes[1], opcode.bytes[2], opcode.mnemonic
+                "{}{:02X} {:02X} {:02X}  {} ",
+                fmt_string, opcode.bytes[0], opcode.bytes[1], opcode.bytes[2], opcode.mnemonic
             );
 
             match opcode.mode {
@@ -1370,7 +1373,12 @@ impl CPU {
         }
 
         fmt_string = format!("{:<42}", fmt_string);
-        write!(self.log_file, "{}", fmt_string).unwrap();
+        fmt_string = format!(
+            "{}     {} CYC:{}",
+            fmt_string, self.old_register_state, self.total_cycles
+        );
+        write!(self.log_file, "{}\n", fmt_string).unwrap();
+        log::info!("{}", fmt_string);
     }
 
     pub fn fetch_indirect_y_base_addr(&self, opcode: &Opcode, bus: &mut BusImpl) -> usize {

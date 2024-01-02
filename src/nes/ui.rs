@@ -32,6 +32,7 @@ impl UI {
             },
         );
         Window::new("Log").show(ctx, |ui| {
+            ui.style_mut().override_text_style = Some(eframe::egui::TextStyle::Monospace);
             // draws the logger ui.
             egui_logger::logger_ui(ui);
         });

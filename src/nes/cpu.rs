@@ -56,8 +56,10 @@ impl Write for OptionalFile {
 
 pub struct CPU {
     pub registers: CPURegisters,
+    pub old_register_state: CPURegisters, // State for the CPU at the end of the PREVIOUS instruction
+    pub current_instruction_addr: usize, // Stores the instruction of the opcode currently executing
     cycles_remaining: u8,
-    total_cycles: usize,
+    pub total_cycles: usize,
     pub log_file: OptionalFile,
 }
 
@@ -71,6 +73,8 @@ impl CPU {
         bus.read_exact(0xFFFC, &mut buf)?;
         Ok(Self {
             registers: CPURegisters::new(u16::from_le_bytes(buf) as usize),
+            old_register_state: CPURegisters::new(u16::from_le_bytes(buf) as usize),
+            current_instruction_addr: 0x0,
             cycles_remaining: 0,
             total_cycles: 7, // TODO: CPU init takes some prep work, not sure if I should step
             // through this or if its good enough to just set the
@@ -125,21 +129,14 @@ impl CPU {
             // The nestest log requires the cpu register state PRIOR to executing
             // the instruction, so we copy the current state of the registers
             // for later, when we print to the log
-            let old_state = self.registers.clone();
+            self.old_register_state = self.registers.clone();
             // Fetch the opcode
             // Throw a BRK instruction is we can't read the opcode memory location
             // TODO: Better way of handling this?
-            let opcode_addr = self.registers.program_counter;
-            let opcode = bus.read_byte(opcode_addr).unwrap_or(0x0);
+            self.current_instruction_addr = self.registers.program_counter;
+            let opcode = bus.read_byte(self.current_instruction_addr).unwrap_or(0x0);
             self.registers.program_counter += 1;
-            write!(self.log_file, "{:04X}  ", opcode_addr).unwrap();
             let cycle_count = self.execute_opcode(opcode, bus)?;
-            writeln!(
-                self.log_file,
-                "     {} CYC:{}",
-                old_state, self.total_cycles
-            )
-            .unwrap();
             self.total_cycles += cycle_count as usize;
             self.cycles_remaining = cycle_count;
             Ok(())

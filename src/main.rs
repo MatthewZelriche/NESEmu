@@ -1,3 +1,4 @@
+use eframe::egui::ViewportBuilder;
 use nes::NES;
 
 mod nes;
@@ -7,6 +8,7 @@ fn main() {
     let path = "res/nestest.nes";
     let mut native_options = eframe::NativeOptions::default();
     native_options.vsync = false;
+    native_options.viewport = ViewportBuilder::default().with_inner_size([1024.0, 768.0]);
     eframe::run_native(
         "NESEmu",
         native_options,
