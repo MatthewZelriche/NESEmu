@@ -14,6 +14,7 @@ pub struct NES {
     cpu: CPU,
     bus: BusImpl,
     ui: UI,
+    halt: bool,
 }
 
 impl NES {
@@ -24,13 +25,25 @@ impl NES {
             cpu,
             bus,
             ui: UI::new(),
+            halt: false,
         })
     }
 }
 
 impl eframe::App for NES {
     fn update(&mut self, ctx: &eframe::egui::Context, _: &mut eframe::Frame) {
-        self.cpu.step(&mut self.bus);
+        if !self.halt {
+            // Since we don't have a PPU generating frames yet
+            // we can just fake roughly how many cycles should be executed per frame
+            for _ in 0..29781 {
+                if let Err(error) = self.cpu.step(&mut self.bus) {
+                    self.halt = true;
+                    log::error!("Emulation failed with error: {}", error);
+                    break;
+                }
+            }
+        }
+
         self.ui.render(ctx, &mut self.bus);
         ctx.request_repaint();
     }

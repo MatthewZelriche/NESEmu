@@ -117,15 +117,15 @@ impl CPU {
         self.registers.status_register.set(val);
     }
 
-    pub fn step(&mut self, bus: &mut BusImpl) {
+    pub fn step(&mut self, bus: &mut BusImpl) -> Result<(), &'static str> {
         if self.cycles_remaining != 0 {
             self.cycles_remaining -= 1;
+            Ok(())
         } else {
             // The nestest log requires the cpu register state PRIOR to executing
             // the instruction, so we copy the current state of the registers
             // for later, when we print to the log
             let old_state = self.registers.clone();
-
             // Fetch the opcode
             // Throw a BRK instruction is we can't read the opcode memory location
             // TODO: Better way of handling this?
@@ -133,26 +133,16 @@ impl CPU {
             let opcode = bus.read_byte(opcode_addr).unwrap_or(0x0);
             self.registers.program_counter += 1;
             write!(self.log_file, "{:04X}  ", opcode_addr).unwrap();
-
-            match self.execute_opcode(opcode, bus) {
-                Ok(cycle_count) => {
-                    writeln!(
-                        self.log_file,
-                        "     {} CYC:{}",
-                        old_state, self.total_cycles
-                    )
-                    .unwrap();
-                    self.total_cycles += cycle_count as usize;
-                    self.cycles_remaining = cycle_count;
-                }
-                Err(error) => {
-                    log::error!(
-                        "Instruction at address {:X} failed with msg: {}",
-                        opcode_addr,
-                        error
-                    )
-                }
-            }
+            let cycle_count = self.execute_opcode(opcode, bus)?;
+            writeln!(
+                self.log_file,
+                "     {} CYC:{}",
+                old_state, self.total_cycles
+            )
+            .unwrap();
+            self.total_cycles += cycle_count as usize;
+            self.cycles_remaining = cycle_count;
+            Ok(())
         }
     }
 
