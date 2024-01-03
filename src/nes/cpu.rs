@@ -11,7 +11,7 @@ use tock_registers::{
     registers::InMemoryRegister,
 };
 
-use super::bus::{Bus, BusImpl};
+use super::bus::Bus;
 
 register_bitfields!(
     u8,
@@ -40,7 +40,7 @@ impl CPU {
     pub const PAGE_SZ_MASK: usize = 0xFF00;
     pub const STACK_PG_START: usize = 0x100;
 
-    pub fn new<T: Bus>(bus: &T) -> Result<Self, &'static str> {
+    pub fn new(bus: &Bus) -> Result<Self, &'static str> {
         // Get start program counter
         let mut buf = [0u8; 2];
         bus.read_exact(0xFFFC, &mut buf)?;
@@ -70,7 +70,7 @@ impl CPU {
             .modify(Status::INT_DISABLE::SET);
     }
 
-    pub fn push_stack<T: Bus>(&mut self, data: &[u8], bus: &mut T) -> Result<(), &'static str> {
+    pub fn push_stack(&mut self, data: &[u8], bus: &mut Bus) -> Result<(), &'static str> {
         for byte in data {
             bus.write_byte(self.registers.stack_ptr + CPU::STACK_PG_START, *byte)?;
             self.registers.stack_ptr -= 1;
@@ -79,7 +79,7 @@ impl CPU {
         Ok(())
     }
 
-    pub fn pop_stack<T: Bus>(&mut self, data: &mut [u8], bus: &mut T) -> Result<(), &'static str> {
+    pub fn pop_stack(&mut self, data: &mut [u8], bus: &mut Bus) -> Result<(), &'static str> {
         for byte in &mut *data {
             self.registers.stack_ptr += 1;
             *byte = bus.read_byte(self.registers.stack_ptr + CPU::STACK_PG_START)?;
@@ -94,7 +94,7 @@ impl CPU {
         self.registers.status_register.set(val);
     }
 
-    pub fn step(&mut self, bus: &mut BusImpl) -> Result<(), &'static str> {
+    pub fn step(&mut self, bus: &mut Bus) -> Result<(), &'static str> {
         if self.cycles_remaining != 0 {
             self.cycles_remaining -= 1;
             Ok(())

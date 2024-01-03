@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind};
 
-use self::{bus::BusImpl, cpu::CPU, ppu::PPU, ui::UI};
+use self::{bus::Bus, cpu::CPU, ppu::PPU, ui::UI};
 
 mod bus;
 mod cartridge;
@@ -14,14 +14,14 @@ mod ui;
 pub struct NES {
     cpu: CPU,
     ppu: PPU,
-    bus: BusImpl,
+    bus: Bus,
     ui: UI,
     halt: bool,
 }
 
 impl NES {
     pub fn new(rom_path: &str) -> Result<Self, Error> {
-        let bus = BusImpl::new(rom_path)?;
+        let bus = Bus::new(rom_path)?;
         let cpu = CPU::new(&bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
         Ok(Self {
             cpu,

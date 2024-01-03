@@ -2,20 +2,14 @@ use std::io::Error;
 
 use super::cartridge::Cartridge;
 
-pub trait Bus {
-    fn read_byte(&self, address: usize) -> Result<u8, &'static str>;
-    fn read_exact(&self, address: usize, buf: &mut [u8]) -> Result<(), &'static str>;
-    fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str>;
-}
-
-pub struct BusImpl {
+pub struct Bus {
     cartridge: Cartridge,
     cpu_ram: [u8; 2048],
     ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
     ppu_registers: [u8; 8],
 }
 
-impl BusImpl {
+impl Bus {
     pub fn new(rom_path: &str) -> Result<Self, Error> {
         Ok(Self {
             cartridge: Cartridge::new(rom_path)?,
@@ -27,8 +21,8 @@ impl BusImpl {
     }
 }
 
-impl Bus for BusImpl {
-    fn read_byte(&self, address: usize) -> Result<u8, &'static str> {
+impl Bus {
+    pub fn read_byte(&self, address: usize) -> Result<u8, &'static str> {
         match address {
             (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
             (0x2000..=0x3FFF) => Ok(self.ppu_registers[(address - 0x2000) % 8]),
@@ -40,7 +34,7 @@ impl Bus for BusImpl {
         }
     }
 
-    fn read_exact(&self, address: usize, buf: &mut [u8]) -> Result<(), &'static str> {
+    pub fn read_exact(&self, address: usize, buf: &mut [u8]) -> Result<(), &'static str> {
         let len = buf.len();
         for i in 0..len {
             buf[i] = self.read_byte(address + i)?;
@@ -48,7 +42,7 @@ impl Bus for BusImpl {
         Ok(())
     }
 
-    fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
+    pub fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
         match address {
             (0..=2048) => Ok(self.cpu_ram[address] = value),
             (0x2000..=0x3FFF) => Ok(self.ppu_registers[(address - 0x2000) % 8] = value),

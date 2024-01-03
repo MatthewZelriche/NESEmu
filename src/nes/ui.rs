@@ -20,7 +20,7 @@ impl UI {
         }
     }
 
-    pub fn render<T: Bus>(&mut self, ctx: &Context, bus: &mut T) {
+    pub fn render(&mut self, ctx: &Context, bus: &mut Bus) {
         self.mem_editor.window_ui(
             ctx,
             &mut self.mem_editor_open,
