@@ -10,15 +10,19 @@ pub trait Bus {
 
 pub struct BusImpl {
     cartridge: Cartridge,
-    system_ram: [u8; 2048],
+    cpu_ram: [u8; 2048],
+    ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
+    ppu_registers: [u8; 8],
 }
 
 impl BusImpl {
     pub fn new(rom_path: &str) -> Result<Self, Error> {
         Ok(Self {
             cartridge: Cartridge::new(rom_path)?,
-            system_ram: [0u8; 2048], // Real RAM starts in an uninit state, but rust
-                                     // makes us init it
+            cpu_ram: [0u8; 2048], // Real RAM starts in an uninit state, but rust
+            // makes us init it
+            ppu_ram: [0u8; 2048],
+            ppu_registers: [0u8; 8],
         })
     }
 }
@@ -26,7 +30,8 @@ impl BusImpl {
 impl Bus for BusImpl {
     fn read_byte(&self, address: usize) -> Result<u8, &'static str> {
         match address {
-            (0..=0x1FFF) => Ok(self.system_ram[address % 0x0800]),
+            (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
+            (0x2000..=0x3FFF) => Ok(self.ppu_registers[(address - 0x2000) % 8]),
             (0x4020..=0xFFFF) => {
                 let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
                 Ok(self.cartridge.get_prg_rom()[prg_addr])
@@ -45,7 +50,8 @@ impl Bus for BusImpl {
 
     fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
         match address {
-            (0..=2048) => Ok(self.system_ram[address] = value),
+            (0..=2048) => Ok(self.cpu_ram[address] = value),
+            (0x2000..=0x3FFF) => Ok(self.ppu_registers[(address - 0x2000) % 8] = value),
             _ => Err("Bad address write on Bus"),
         }
     }
