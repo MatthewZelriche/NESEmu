@@ -10,6 +10,7 @@ mod instruction;
 mod mappers;
 mod ppu;
 mod ui;
+mod util;
 
 pub struct NES {
     cpu: CPU,

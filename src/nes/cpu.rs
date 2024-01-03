@@ -1,8 +1,4 @@
-use std::{
-    fmt::Display,
-    fs::{File, OpenOptions},
-    io::Write,
-};
+use std::fmt::Display;
 
 use bitfield::BitMut;
 use tock_registers::{
@@ -11,7 +7,7 @@ use tock_registers::{
     registers::InMemoryRegister,
 };
 
-use super::bus::Bus;
+use super::{bus::Bus, util::OptionalFile};
 
 register_bitfields!(
     u8,
@@ -52,14 +48,7 @@ impl CPU {
             total_cycles: 7, // TODO: CPU init takes some prep work, not sure if I should step
             // through this or if its good enough to just set the
             // value instantly here
-            log_file: OptionalFile(
-                OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open("nesemu.log")
-                    .ok(),
-            ),
+            log_file: OptionalFile::new("nesemu.log"),
         })
     }
 
@@ -175,21 +164,5 @@ impl Display for CPURegisters {
             self.status_register.get(),
             self.stack_ptr
         )
-    }
-}
-
-pub struct OptionalFile(Option<File>);
-impl Write for OptionalFile {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Some(file) = self.0.as_mut() {
-            write!(file, "{}", std::str::from_utf8(buf).unwrap())?;
-            return Ok(buf.len());
-        }
-
-        Ok(0)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
