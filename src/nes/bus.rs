@@ -1,12 +1,61 @@
 use std::io::Error;
 
+use tock_registers::{
+    interfaces::{Readable, Writeable},
+    register_bitfields,
+    registers::InMemoryRegister,
+};
+
 use super::cartridge::Cartridge;
+
+register_bitfields!(
+    u8,
+    pub PPUCTRL [
+        NTABLE_ADDR         OFFSET(0) NUMBITS(2) [
+            Addr2000 = 0,
+            Addr2400 = 1,
+            Addr2800 = 2,
+            Addr2C00 = 3,
+        ],
+        VRAM_INC            OFFSET(2) NUMBITS(1) [],
+        SPTNTABLE_ADDR      OFFSET(3) NUMBITS(1) [],
+        BPTNTABLE_ADDR      OFFSET(4) NUMBITS(1) [],
+        SPRITE_SIZE         OFFSET(5) NUMBITS(1) [],
+        MASTER_SLAVE_SELECT OFFSET(6) NUMBITS(1) [],
+        NMI_ENABLE          OFFSET(7) NUMBITS(1) [],
+    ]
+);
+
+register_bitfields!(
+    u8,
+    pub PPUSTATUS [
+        UNUSED              OFFSET(0) NUMBITS(5) [],
+        SPRITE_OVERFLOW     OFFSET(5) NUMBITS(1) [],
+        SPRITE0_HIT         OFFSET(6) NUMBITS(1) [],
+        VBLANK              OFFSET(7) NUMBITS(1) [],
+    ]
+);
+
+pub struct PPURegisters {
+    ppuctrl: InMemoryRegister<u8, PPUCTRL::Register>,
+    ppustatus: InMemoryRegister<u8, PPUSTATUS::Register>,
+}
+
+impl Default for PPURegisters {
+    fn default() -> Self {
+        Self {
+            ppuctrl: InMemoryRegister::new(0),
+            ppustatus: InMemoryRegister::new(0),
+        }
+    }
+}
 
 pub struct Bus {
     cartridge: Cartridge,
     cpu_ram: [u8; 2048],
     ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
-    ppu_registers: [u8; 8],
+
+    ppu_registers: PPURegisters,
 }
 
 impl Bus {
@@ -16,7 +65,7 @@ impl Bus {
             cpu_ram: [0u8; 2048], // Real RAM starts in an uninit state, but rust
             // makes us init it
             ppu_ram: [0u8; 2048],
-            ppu_registers: [0u8; 8],
+            ppu_registers: PPURegisters::default(),
         })
     }
 }
@@ -51,10 +100,22 @@ impl Bus {
     }
 
     pub fn read_ppu_register(&self, address: usize) -> Result<u8, &'static str> {
-        Ok(self.ppu_registers[(address - 0x2000) % 8])
+        match address {
+            0x2000 => Ok(self.ppu_registers.ppuctrl.get()),
+            0x2001 => todo!(),
+            0x2002 => Ok(self.ppu_registers.ppustatus.get()),
+            (0x2003..=0x2007) => todo!(),
+            _ => Err("Bad Read on PPU register"),
+        }
     }
 
     pub fn write_ppu_register(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
-        Ok(self.ppu_registers[(address - 0x2000) % 8] = value)
+        match address {
+            0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
+            0x2001 => todo!(),
+            0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
+            (0x2003..=0x2007) => todo!(),
+            _ => Err("Bad Write on PPU Register"),
+        }
     }
 }

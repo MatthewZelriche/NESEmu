@@ -40,10 +40,18 @@ impl eframe::App for NES {
             // Since we don't have a PPU generating frames yet
             // we can just fake roughly how many cycles should be executed per frame
             for _ in 0..29781 {
-                if let Err(error) = self.cpu.step(&mut self.bus) {
-                    self.halt = true;
-                    log::error!("Emulation failed with error: {}", error);
-                    break;
+                match self.cpu.step(&mut self.bus) {
+                    Ok(_) => {
+                        // 3 cycles per CPU cycle
+                        for _ in 0..3 {
+                            self.ppu.step();
+                        }
+                    }
+                    Err(error) => {
+                        self.halt = true;
+                        log::error!("Emulation failed with error: {}", error);
+                        break;
+                    }
                 }
             }
         }
