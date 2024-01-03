@@ -1289,7 +1289,12 @@ impl CPU {
             AddressMode::ABSOLUTE(_) => {
                 Ok(u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize)
             }
-            AddressMode::RELATIVE => Ok(opcode.bytes[1] as usize + self.registers.program_counter),
+            AddressMode::RELATIVE => {
+                // Relative uses a SIGNED offset!
+                // TODO: This may crash if relative is allowed to address in a wrapping fashion (eg 0xFFFF -> zero page)
+                let signed_operand = i8::from_le_bytes([opcode.bytes[1]]) as isize;
+                Ok((signed_operand + self.registers.program_counter as isize) as usize)
+            }
             AddressMode::ZEROPAGE => Ok(opcode.bytes[1] as usize),
             AddressMode::INDIRECTX => {
                 // Indirect zeropage is tricky, because if we are given a lsb of 0xFF,
