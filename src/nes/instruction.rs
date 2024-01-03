@@ -1869,7 +1869,7 @@ impl CPU {
                     fmt_string = format!(
                         "{}${:02X}",
                         fmt_string,
-                        opcode.bytes[1] as usize + self.registers.program_counter
+                        self.fetch_operand_address(opcode, bus)?
                     );
                 }
                 AddressMode::ZEROPAGE => {
