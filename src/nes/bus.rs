@@ -22,10 +22,10 @@ impl Bus {
 }
 
 impl Bus {
-    pub fn read_byte(&self, address: usize) -> Result<u8, &'static str> {
+    pub fn cpu_read_byte(&self, address: usize) -> Result<u8, &'static str> {
         match address {
             (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
-            (0x2000..=0x3FFF) => Ok(self.ppu_registers[(address - 0x2000) % 8]),
+            (0x2000..=0x3FFF) => self.read_ppu_register(address),
             (0x4020..=0xFFFF) => {
                 let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
                 Ok(self.cartridge.get_prg_rom()[prg_addr])
@@ -34,19 +34,27 @@ impl Bus {
         }
     }
 
-    pub fn read_exact(&self, address: usize, buf: &mut [u8]) -> Result<(), &'static str> {
+    pub fn cpu_read_exact(&self, address: usize, buf: &mut [u8]) -> Result<(), &'static str> {
         let len = buf.len();
         for i in 0..len {
-            buf[i] = self.read_byte(address + i)?;
+            buf[i] = self.cpu_read_byte(address + i)?;
         }
         Ok(())
     }
 
-    pub fn write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
+    pub fn cpu_write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
         match address {
             (0..=2048) => Ok(self.cpu_ram[address] = value),
-            (0x2000..=0x3FFF) => Ok(self.ppu_registers[(address - 0x2000) % 8] = value),
+            (0x2000..=0x3FFF) => self.write_ppu_register(address, value),
             _ => Err("Bad address write on Bus"),
         }
+    }
+
+    pub fn read_ppu_register(&self, address: usize) -> Result<u8, &'static str> {
+        Ok(self.ppu_registers[(address - 0x2000) % 8])
+    }
+
+    pub fn write_ppu_register(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
+        Ok(self.ppu_registers[(address - 0x2000) % 8] = value)
     }
 }

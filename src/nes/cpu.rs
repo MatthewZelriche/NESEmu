@@ -43,7 +43,7 @@ impl CPU {
     pub fn new(bus: &Bus) -> Result<Self, &'static str> {
         // Get start program counter
         let mut buf = [0u8; 2];
-        bus.read_exact(0xFFFC, &mut buf)?;
+        bus.cpu_read_exact(0xFFFC, &mut buf)?;
         Ok(Self {
             registers: CPURegisters::new(u16::from_le_bytes(buf) as usize),
             old_register_state: CPURegisters::new(u16::from_le_bytes(buf) as usize),
@@ -72,7 +72,7 @@ impl CPU {
 
     pub fn push_stack(&mut self, data: &[u8], bus: &mut Bus) -> Result<(), &'static str> {
         for byte in data {
-            bus.write_byte(self.registers.stack_ptr + CPU::STACK_PG_START, *byte)?;
+            bus.cpu_write_byte(self.registers.stack_ptr + CPU::STACK_PG_START, *byte)?;
             self.registers.stack_ptr -= 1;
         }
 
@@ -82,7 +82,7 @@ impl CPU {
     pub fn pop_stack(&mut self, data: &mut [u8], bus: &mut Bus) -> Result<(), &'static str> {
         for byte in &mut *data {
             self.registers.stack_ptr += 1;
-            *byte = bus.read_byte(self.registers.stack_ptr + CPU::STACK_PG_START)?;
+            *byte = bus.cpu_read_byte(self.registers.stack_ptr + CPU::STACK_PG_START)?;
         }
 
         Ok(())
@@ -107,7 +107,9 @@ impl CPU {
             // Throw a BRK instruction is we can't read the opcode memory location
             // TODO: Better way of handling this?
             self.current_instruction_addr = self.registers.program_counter;
-            let opcode = bus.read_byte(self.current_instruction_addr).unwrap_or(0x0);
+            let opcode = bus
+                .cpu_read_byte(self.current_instruction_addr)
+                .unwrap_or(0x0);
             self.registers.program_counter += 1;
             let cycle_count = self.execute_opcode(opcode, bus)?;
             self.total_cycles += cycle_count as usize;

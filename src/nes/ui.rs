@@ -25,10 +25,10 @@ impl UI {
             ctx,
             &mut self.mem_editor_open,
             bus,
-            |bus, address| bus.read_byte(address).ok(),
+            |bus, address| bus.cpu_read_byte(address).ok(),
             |bus, address, val| {
                 // Discard error result, this memory editor doesn't need it
-                let _ = bus.write_byte(address, val);
+                let _ = bus.cpu_write_byte(address, val);
             },
         );
         Window::new("Log").show(ctx, |ui| {
