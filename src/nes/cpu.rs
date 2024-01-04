@@ -102,7 +102,7 @@ impl CPU {
             self.registers.program_counter += 1;
             let cycle_count = self.execute_opcode(opcode, bus)?;
             self.total_cycles += cycle_count as usize;
-            self.cycles_remaining = cycle_count;
+            self.cycles_remaining = cycle_count - 1;
             Ok(())
         }
     }
