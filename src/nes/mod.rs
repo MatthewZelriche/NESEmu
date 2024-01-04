@@ -9,6 +9,7 @@ mod ines;
 mod instruction;
 mod mappers;
 mod ppu;
+mod ppu_registers;
 mod ui;
 mod util;
 
