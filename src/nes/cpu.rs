@@ -36,7 +36,7 @@ impl CPU {
     pub const PAGE_SZ_MASK: usize = 0xFF00;
     pub const STACK_PG_START: usize = 0x100;
 
-    pub fn new(bus: &Bus) -> Result<Self, &'static str> {
+    pub fn new(bus: &mut Bus) -> Result<Self, &'static str> {
         // Get start program counter
         let mut buf = [0u8; 2];
         bus.cpu_read_exact(0xFFFC, &mut buf)?;

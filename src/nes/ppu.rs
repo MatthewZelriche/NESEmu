@@ -1,7 +1,8 @@
 use bitfield::Bit;
 use eframe::epaint::Color32;
+use tock_registers::interfaces::ReadWriteable;
 
-use super::{bus::Bus, screen::FrameBuffer};
+use super::{bus::Bus, ppu_registers::PPUSTATUS, screen::FrameBuffer};
 
 pub struct PPU {
     pub scanlines: usize,
@@ -27,6 +28,19 @@ impl PPU {
             }
         }
         self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
+
+        // Handle vblank
+        // TODO: NMI
+        if self.scanlines == 241 && self.dots == 1 {
+            bus.ppu_get_registers()
+                .ppustatus
+                .modify(PPUSTATUS::VBLANK::SET);
+        } else if self.scanlines == 261 && self.dots == 1 {
+            // Pre-render scanline...
+            bus.ppu_get_registers()
+                .ppustatus
+                .modify(PPUSTATUS::VBLANK::CLEAR);
+        }
     }
 
     // TODO: This can be removed at some point when we are done displaying full pattern tables

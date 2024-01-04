@@ -31,8 +31,8 @@ pub struct NES {
 
 impl NES {
     pub fn new(rom_path: &str, cc: &CreationContext) -> Result<Self, Error> {
-        let bus = Bus::new(rom_path)?;
-        let cpu = CPU::new(&bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
+        let mut bus = Bus::new(rom_path)?;
+        let cpu = CPU::new(&mut bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
         Ok(Self {
             cpu,
             ppu: PPU::new(),

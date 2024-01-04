@@ -1246,7 +1246,7 @@ impl CPU {
     ) -> Result<u8, &'static str> {
         let opcode = self.lookup_opcode(opcode_val, bus)?;
         // We don't care if this succeeds or not, since the logging info is optional
-        let _ = self.write_opcode(&opcode, bus);
+        //let _ = self.write_opcode(&opcode, bus);
 
         let addr = self.fetch_operand_address(&opcode, bus)?;
         (opcode.execute)(self, addr, &opcode, bus)
@@ -1847,6 +1847,7 @@ impl CPU {
         Ok(opcode.cycles)
     }
 
+    // TODO: This breaks everything because it performs modifying reads
     pub fn write_opcode(&mut self, opcode: &Opcode, bus: &mut Bus) -> Result<(), &'static str> {
         let mut fmt_string = format!("{:04X}  ", self.current_instruction_addr);
 

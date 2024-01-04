@@ -31,6 +31,7 @@ register_bitfields!(
 pub struct PPURegisters {
     pub ppuctrl: InMemoryRegister<u8, PPUCTRL::Register>,
     pub ppustatus: InMemoryRegister<u8, PPUSTATUS::Register>,
+    pub write_latch: bool,
 }
 
 impl Default for PPURegisters {
@@ -38,6 +39,7 @@ impl Default for PPURegisters {
         Self {
             ppuctrl: InMemoryRegister::new(0),
             ppustatus: InMemoryRegister::new(0),
+            write_latch: false,
         }
     }
 }
