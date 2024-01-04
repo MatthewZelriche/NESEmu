@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::{io::Error, slice::Chunks};
 
 use tock_registers::interfaces::{Readable, Writeable};
 
@@ -74,6 +74,11 @@ impl Bus {
             (0x2003..=0x2007) => todo!(),
             _ => Err("Bad Write on PPU Register"),
         }
+    }
+
+    pub fn ppu_get_pattern_table(&mut self) -> Chunks<'_, u8> {
+        // TODO: handle the two different nametables/mirroring
+        self.cartridge.get_chr_rom().chunks(16)
     }
 
     pub fn ppu_get_registers(&mut self) -> &mut PPURegisters {

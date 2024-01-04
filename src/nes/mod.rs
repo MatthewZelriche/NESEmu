@@ -54,7 +54,7 @@ impl eframe::App for NES {
                     Ok(_) => {
                         // 3 cycles per CPU cycle
                         for _ in 0..3 {
-                            self.ppu.step(&mut self.screen);
+                            self.ppu.step(&mut self.bus, &mut self.screen);
                         }
                     }
                     Err(error) => {

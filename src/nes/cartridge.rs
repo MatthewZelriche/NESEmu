@@ -87,6 +87,10 @@ impl Cartridge {
     pub fn get_prg_rom(&self) -> &[u8] {
         &self.prg_rom
     }
+
+    pub fn get_chr_rom(&self) -> &[u8] {
+        &self.chr_rom
+    }
 }
 
 #[cfg(test)]
