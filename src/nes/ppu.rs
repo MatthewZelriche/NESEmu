@@ -69,7 +69,7 @@ impl PPU {
         for y in tile_px_y..tile_px_y + 8 {
             for x in tile_px_x..tile_px_x + 8 {
                 // Read the palette idx data from both bitplanes in the tile
-                let bit_idx = 7 - x; // Flip the bit index so we go from left to right over the bits
+                let bit_idx = 7 - (x % 8); // Flip the bit index so we go from left to right over the bits
                 let y_tile_idx = y % 8;
                 let palette_idx: u8 = u8::from(tile[y_tile_idx].bit(bit_idx))
                     + u8::from(tile[y_tile_idx + 8].bit(bit_idx));
