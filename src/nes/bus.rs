@@ -1,5 +1,6 @@
 use std::{io::Error, slice::Chunks};
 
+use bitfield::BitRangeMut;
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 use super::{
@@ -96,7 +97,23 @@ impl Bus {
             0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
             0x2001 => Ok(self.ppu_registers.ppustatus.set(value)),
             0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
-            (0x2003..=0x2007) => todo!("Attempt to write register: 0x{:X}", address),
+            0x2006 => {
+                if !self.ppu_registers.write_latch {
+                    self.ppu_registers.ppuaddr.set_bit_range(15, 8, value);
+                    self.ppu_registers.write_latch = true;
+                } else {
+                    self.ppu_registers.ppuaddr.set_bit_range(7, 0, value);
+                    self.ppu_registers.write_latch = false;
+                    // Addresses higher than 0x3FFF get mirrored
+                    self.ppu_registers.ppuaddr = self.ppu_registers.ppuaddr % 0x4000;
+                }
+                Ok(())
+            }
+            (0x2003..=0x2007) => todo!(
+                "Attempt to write register: 0x{:X}, ppuaddr: {:X}",
+                address,
+                self.ppu_registers.ppuaddr
+            ),
             _ => Err("Bad Write on PPU Register"),
         }
     }
