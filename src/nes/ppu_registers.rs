@@ -20,6 +20,20 @@ register_bitfields!(
 
 register_bitfields!(
     u8,
+    pub PPUMASK [
+        GRAYSCALE            OFFSET(0) NUMBITS(1) [],
+        LEFT_8_MASK_BGRND    OFFSET(1) NUMBITS(1) [],
+        LEFT_8_MASK_SPRTE    OFFSET(2) NUMBITS(1) [],
+        SHOW_BACKGROUND      OFFSET(3) NUMBITS(1) [],
+        SHOW_SPRITES         OFFSET(4) NUMBITS(1) [],
+        EMPH_RED             OFFSET(5) NUMBITS(1) [],
+        EMPH_GREEN           OFFSET(6) NUMBITS(1) [],
+        EMPH_BLUE            OFFSET(7) NUMBITS(1) [],
+    ]
+);
+
+register_bitfields!(
+    u8,
     pub PPUSTATUS [
         UNUSED              OFFSET(0) NUMBITS(5) [],
         SPRITE_OVERFLOW     OFFSET(5) NUMBITS(1) [],
@@ -30,6 +44,7 @@ register_bitfields!(
 
 pub struct PPURegisters {
     pub ppuctrl: InMemoryRegister<u8, PPUCTRL::Register>,
+    pub ppumask: InMemoryRegister<u8, PPUMASK::Register>,
     pub ppustatus: InMemoryRegister<u8, PPUSTATUS::Register>,
     pub write_latch: bool,
 }
@@ -38,6 +53,7 @@ impl Default for PPURegisters {
     fn default() -> Self {
         Self {
             ppuctrl: InMemoryRegister::new(0),
+            ppumask: InMemoryRegister::new(0),
             ppustatus: InMemoryRegister::new(0),
             write_latch: false,
         }

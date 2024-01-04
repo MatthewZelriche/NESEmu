@@ -72,8 +72,6 @@ impl Bus {
         modify: bool,
     ) -> Result<u8, &'static str> {
         match address {
-            0x2000 => Ok(self.ppu_registers.ppuctrl.get()),
-            0x2001 => todo!(),
             0x2002 => {
                 let val = self.ppu_registers.ppustatus.get();
                 if modify {
@@ -96,9 +94,9 @@ impl Bus {
     ) -> Result<(), &'static str> {
         match address {
             0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
-            0x2001 => todo!(),
+            0x2001 => Ok(self.ppu_registers.ppustatus.set(value)),
             0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
-            (0x2003..=0x2007) => todo!(),
+            (0x2003..=0x2007) => todo!("Attempt to write register: 0x{:X}", address),
             _ => Err("Bad Write on PPU Register"),
         }
     }
