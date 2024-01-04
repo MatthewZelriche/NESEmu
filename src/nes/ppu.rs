@@ -1,22 +1,26 @@
 pub struct PPU {
-    scanlines: u16,
-    cycles: usize,
+    pub scanlines: usize,
+    pub dots: usize,
 }
 
 impl PPU {
+    const DOTS_PER_SCANLINE: usize = 341;
+    const NUM_SCANLINES: usize = 262;
     pub fn new() -> Self {
         Self {
             scanlines: 0,
-            cycles: 21, // Simulates power-up delay
+            dots: 21, // Simulates power-up delay
         }
     }
 
     pub fn step(&mut self) {
-        if self.cycles == 341 {
-            self.cycles = 0;
+        self.dots += 1;
+        if self.dots == PPU::DOTS_PER_SCANLINE {
             self.scanlines += 1;
-        } else {
-            self.cycles += 1;
+            if self.scanlines >= PPU::NUM_SCANLINES {
+                self.scanlines = 0;
+            }
         }
+        self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
     }
 }
