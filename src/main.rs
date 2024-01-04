@@ -12,8 +12,8 @@ fn main() {
     eframe::run_native(
         "NESEmu",
         native_options,
-        Box::new(|_| {
-            Box::new(match NES::new(path) {
+        Box::new(|cc| {
+            Box::new(match NES::new(path, cc) {
                 Ok(nes) => nes,
                 Err(error) => panic!("failed to initialize NES with error: {}", error),
             })

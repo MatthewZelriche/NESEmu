@@ -1,6 +1,11 @@
 use std::io::{Error, ErrorKind};
 
-use self::{bus::Bus, cpu::CPU, ppu::PPU, ui::UI};
+use eframe::{
+    egui::{Image, Window},
+    CreationContext,
+};
+
+use self::{bus::Bus, cpu::CPU, ppu::PPU, screen::Screen, ui::UI};
 
 mod bus;
 mod cartridge;
@@ -8,8 +13,10 @@ mod cpu;
 mod ines;
 mod instruction;
 mod mappers;
+mod palette;
 mod ppu;
 mod ppu_registers;
+mod screen;
 mod ui;
 mod util;
 
@@ -19,10 +26,11 @@ pub struct NES {
     bus: Bus,
     ui: UI,
     halt: bool,
+    screen: Screen,
 }
 
 impl NES {
-    pub fn new(rom_path: &str) -> Result<Self, Error> {
+    pub fn new(rom_path: &str, cc: &CreationContext) -> Result<Self, Error> {
         let bus = Bus::new(rom_path)?;
         let cpu = CPU::new(&bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
         Ok(Self {
@@ -31,6 +39,7 @@ impl NES {
             bus,
             ui: UI::new(),
             halt: false,
+            screen: Screen::new(cc.egui_ctx.clone()),
         })
     }
 }
@@ -58,6 +67,9 @@ impl eframe::App for NES {
         }
 
         self.ui.render(ctx, &mut self.bus);
+        self.screen.update_texture();
+        Window::new("Game").show(ctx, |ui| ui.add(Image::new(&self.screen.texture)));
+
         ctx.request_repaint();
     }
 }
