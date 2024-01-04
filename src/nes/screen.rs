@@ -9,7 +9,7 @@ pub struct Screen {
 }
 
 pub trait FrameBuffer {
-    fn plot_pixel(x: usize, y: usize, color: Color32);
+    fn plot_pixel(&mut self, x: usize, y: usize, color: Color32);
 }
 
 impl Screen {
@@ -34,7 +34,11 @@ impl Screen {
 }
 
 impl FrameBuffer for Screen {
-    fn plot_pixel(x: usize, y: usize, color: Color32) {
-        todo!()
+    fn plot_pixel(&mut self, x: usize, y: usize, color: Color32) {
+        // If this fails, its because we are in overscan and there's no point to rendering
+        // Plus, it would panic anyway
+        if let Some(pixel) = self.frame_buffer.pixels.get_mut(y * Screen::WIDTH + x) {
+            *pixel = color;
+        }
     }
 }

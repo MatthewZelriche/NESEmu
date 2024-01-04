@@ -1,3 +1,7 @@
+use eframe::epaint::Color32;
+
+use super::screen::FrameBuffer;
+
 pub struct PPU {
     pub scanlines: usize,
     pub dots: usize,
@@ -13,7 +17,7 @@ impl PPU {
         }
     }
 
-    pub fn step(&mut self) {
+    pub fn step<T: FrameBuffer>(&mut self, fb: &mut T) {
         self.dots += 1;
         if self.dots == PPU::DOTS_PER_SCANLINE {
             self.scanlines += 1;
@@ -22,5 +26,8 @@ impl PPU {
             }
         }
         self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
+
+        // Draw random gunk
+        fb.plot_pixel(self.dots, self.scanlines, Color32::RED);
     }
 }
