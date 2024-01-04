@@ -67,6 +67,7 @@ impl eframe::App for NES {
         }
 
         self.ui.render(ctx, &mut self.bus);
+        self.ppu.debug_render(&mut self.bus, &mut self.screen);
         self.screen.update_texture();
         Window::new("Game").show(ctx, |ui| ui.add(Image::new(&self.screen.texture)));
 

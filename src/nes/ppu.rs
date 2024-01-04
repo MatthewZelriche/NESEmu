@@ -27,14 +27,22 @@ impl PPU {
             }
         }
         self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
+    }
 
-        self.plot_tile(0, 0, 6, bus, fb);
+    // TODO: This can be removed at some point when we are done displaying full pattern tables
+    pub fn debug_render<T: FrameBuffer>(&mut self, bus: &mut Bus, fb: &mut T) {
+        // Render the entire pattern table
+        for i in 0..256 {
+            let tile_px_x = (i % 31) * 8;
+            let tile_px_y = (i / 31) * 8;
+            self.plot_tile(tile_px_x, tile_px_y, i.try_into().unwrap(), bus, fb);
+        }
     }
 
     fn plot_tile<T: FrameBuffer>(
         &self,
-        tile_x: usize,
-        tile_y: usize,
+        tile_px_x: usize,
+        tile_px_y: usize,
         pt_idx: u8,
         bus: &mut Bus,
         fb: &mut T,
@@ -44,13 +52,13 @@ impl PPU {
         let tile = pattern_table.nth(pt_idx as usize).unwrap();
 
         // Draw the tile to the framebuffer
-        // TODO: Draw at specified tile offset
-        for y in 0..8 {
-            for x in 0..8 {
+        for y in tile_px_y..tile_px_y + 8 {
+            for x in tile_px_x..tile_px_x + 8 {
                 // Read the palette idx data from both bitplanes in the tile
                 let bit_idx = 7 - x; // Flip the bit index so we go from left to right over the bits
-                let palette_idx: u8 =
-                    u8::from(tile[y].bit(bit_idx)) + u8::from(tile[y + 8].bit(bit_idx));
+                let y_tile_idx = y % 8;
+                let palette_idx: u8 = u8::from(tile[y_tile_idx].bit(bit_idx))
+                    + u8::from(tile[y_tile_idx + 8].bit(bit_idx));
 
                 // TODO: Proper palette index lookup
                 fb.plot_pixel(
