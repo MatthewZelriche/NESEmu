@@ -1,19 +1,13 @@
-use std::slice::Chunks;
-
 use bitfield::Bit;
 use eframe::epaint::Color32;
-use tock_registers::interfaces::{ReadWriteable, Readable};
+use tock_registers::interfaces::ReadWriteable;
 
-use super::{
-    bus::Bus,
-    ines::Flags1,
-    ppu_registers::{PPUCTRL, PPUSTATUS},
-    screen::FrameBuffer,
-};
+use super::{bus::Bus, ppu_registers::PPUSTATUS, screen::FrameBuffer};
 
 pub struct PPU {
     pub scanlines: usize,
     pub dots: usize,
+    generated_interrupt: bool,
 }
 
 impl PPU {
@@ -23,6 +17,7 @@ impl PPU {
         Self {
             scanlines: 0,
             dots: 21, // Simulates power-up delay
+            generated_interrupt: false,
         }
     }
 
@@ -39,11 +34,11 @@ impl PPU {
         self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
 
         // Handle vblank
-        // TODO: NMI
         if self.scanlines == 241 && self.dots == 1 {
             bus.ppu_get_registers()
                 .ppustatus
                 .modify(PPUSTATUS::VBLANK::SET);
+            self.generated_interrupt = true;
         } else if self.scanlines == 261 && self.dots == 1 {
             // Pre-render scanline...
             bus.ppu_get_registers()
@@ -109,5 +104,14 @@ impl PPU {
                 );
             }
         }
+    }
+
+    pub fn generated_interrupt(&mut self) -> bool {
+        let res = self.generated_interrupt;
+        if self.generated_interrupt {
+            self.generated_interrupt = false;
+        }
+
+        res
     }
 }

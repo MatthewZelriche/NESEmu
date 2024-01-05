@@ -83,7 +83,11 @@ impl CPU {
         self.registers.status_register.set(val);
     }
 
-    pub fn step(&mut self, bus: &mut Bus) -> Result<(), &'static str> {
+    pub fn step(
+        &mut self,
+        bus: &mut Bus,
+        pending_interrupt: &mut bool,
+    ) -> Result<(), &'static str> {
         if self.cycles_remaining != 0 {
             self.cycles_remaining -= 1;
             Ok(())
@@ -92,6 +96,11 @@ impl CPU {
             // the instruction, so we copy the current state of the registers
             // for later, when we print to the log
             self.old_register_state = self.registers.clone();
+            if *pending_interrupt {
+                *pending_interrupt = false;
+                self.handle_irq(bus)?;
+                return Ok(());
+            }
             // Fetch the opcode
             self.current_instruction_addr = self.registers.program_counter;
             let opcode = bus.cpu_read_byte(self.current_instruction_addr)?;
@@ -101,6 +110,27 @@ impl CPU {
             self.cycles_remaining = cycle_count - 1;
             Ok(())
         }
+    }
+
+    pub fn handle_irq(&mut self, bus: &mut Bus) -> Result<(), &'static str> {
+        // TODO: This doesn't support IRQs which arent NMIs
+
+        // big endian because we need to push to the stack in reverse order of how they should be
+        self.push_stack(
+            &u16::to_be_bytes((self.registers.program_counter) as u16),
+            bus,
+        )?;
+        let sr = [self.registers.status_register.get()];
+        self.registers
+            .status_register
+            .modify(Status::INT_DISABLE::SET);
+        self.push_stack(&sr, bus)?;
+
+        let mut interrupt_vector = [0u8; 2];
+        bus.cpu_read_exact(0xFFFA, &mut interrupt_vector)?;
+        self.registers.program_counter = u16::from_le_bytes(interrupt_vector) as usize;
+        self.total_cycles += 7;
+        Ok(())
     }
 
     pub fn will_cross_boundary(old_pc: usize, new_pc: usize) -> bool {

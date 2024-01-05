@@ -88,7 +88,10 @@ impl Bus {
                 }
                 Ok(val)
             }
-            (0x2003..=0x2007) => todo!(),
+            0x2003 => todo!(),
+            0x2004 => Ok(0x0), // TODO
+            (0x2005..=0x2006) => todo!(),
+            0x2007 => Ok(0x0), // TODO
             _ => Err("Bad Read on PPU register"),
         }
     }
@@ -102,6 +105,8 @@ impl Bus {
             0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
             0x2001 => Ok(self.ppu_registers.ppustatus.set(value)),
             0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
+            0x2003 => Ok(()), // TODO
+            0x2004 => Ok(()), // TODO
             0x2005 => {
                 // TODO: Implement scrolling
                 // Just add dummy stuff here for now to get it functioning
@@ -123,7 +128,7 @@ impl Bus {
                 // TODO: Thigns like CHRRAM and other scenarios where the CPU
                 // can write to something thats not a nametable
                 (0x2000..=0x2FFF) => {
-                    self.ppu_ram[(self.ppu_registers.ppuaddr - 0x2000) as usize] = value;
+                    self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)] = value;
                     if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
                         // TODO: Does this need a wrapping add?
                         self.ppu_registers.ppuaddr += 32;
@@ -133,13 +138,9 @@ impl Bus {
 
                     Ok(())
                 }
+                (0x3F00..=0x3FFF) => Ok(()), // TODO: Palette memory
                 _ => Err("Bad write to PPU Bus by CPU"),
             },
-            (0x2003..=0x2004) => todo!(
-                "Attempt to write register: 0x{:X}, ppuaddr: {:X}",
-                address,
-                self.ppu_registers.ppuaddr
-            ),
             _ => Err("Bad Write on PPU Register"),
         }
     }
@@ -189,6 +190,34 @@ impl Bus {
                 PPUCTRL::NTABLE_ADDR::Value::Addr2400 => &self.ppu_ram[0..],
                 PPUCTRL::NTABLE_ADDR::Value::Addr2800 => &self.ppu_ram[1024..],
                 PPUCTRL::NTABLE_ADDR::Value::Addr2C00 => &self.ppu_ram[1024..],
+            },
+        }
+    }
+
+    // TODO: This is a dumb hack
+    pub fn translate_nametable_addr(&self, addr: u16) -> usize {
+        let nametable_mirror: Flags1::MIRRORING::Value = self
+            .cartridge_header()
+            .flags1
+            .read_as_enum(Flags1::MIRRORING)
+            .unwrap();
+
+        let bytes = u16::to_le_bytes(addr);
+
+        match nametable_mirror {
+            Flags1::MIRRORING::Value::VERT => match bytes[1] {
+                (0x20..=0x23) => (addr - 0x2000) as usize,
+                (0x24..=0x27) => (addr - 0x2400 + 0x400) as usize,
+                (0x28..=0x2B) => (addr - 0x2800) as usize,
+                (0x2C..=0x2F) => (addr - 0x2C00 + 0x400) as usize,
+                _ => panic!(),
+            },
+            Flags1::MIRRORING::Value::HORZ => match bytes[1] {
+                (0x20..=0x23) => (addr - 0x2000) as usize,
+                (0x24..=0x27) => (addr - 0x2400) as usize,
+                (0x28..=0x2B) => (addr - 0x2800 + 0x400) as usize,
+                (0x2C..=0x2F) => (addr - 0x2C00 + 0x400) as usize,
+                _ => panic!(),
             },
         }
     }
