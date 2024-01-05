@@ -91,6 +91,10 @@ impl Cartridge {
     pub fn get_chr_rom(&self) -> &[u8] {
         &self.chr_rom
     }
+
+    pub fn get_header(&self) -> &INESHeader {
+        &self.header
+    }
 }
 
 #[cfg(test)]

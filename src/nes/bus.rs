@@ -5,6 +5,7 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 use super::{
     cartridge::Cartridge,
+    ines::{Flags1, INESHeader},
     ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
 };
 
@@ -28,6 +29,10 @@ impl Bus {
 }
 
 impl Bus {
+    pub fn cartridge_header(&self) -> &INESHeader {
+        &self.cartridge.get_header()
+    }
+
     pub fn cpu_read_byte(&mut self, address: usize) -> Result<u8, &'static str> {
         match address {
             (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
@@ -139,12 +144,52 @@ impl Bus {
         }
     }
 
-    pub fn ppu_get_pattern_table(&mut self) -> Chunks<'_, u8> {
-        // TODO: handle the two different nametables/mirroring
-        self.cartridge.get_chr_rom().chunks(16)
+    pub fn ppu_get_pattern_table(&self, background: bool) -> Chunks<'_, u8> {
+        if background {
+            let base_addr = if self.ppu_registers.ppuctrl.is_set(PPUCTRL::BPTNTABLE_ADDR) {
+                0x1000
+            } else {
+                0x0000
+            };
+            self.cartridge.get_chr_rom()[base_addr..].chunks(16)
+        } else {
+            let base_addr = if self.ppu_registers.ppuctrl.is_set(PPUCTRL::SPTNTABLE_ADDR) {
+                0x1000
+            } else {
+                0x0000
+            };
+            self.cartridge.get_chr_rom()[base_addr..].chunks(16)
+        }
     }
 
     pub fn ppu_get_registers(&mut self) -> &mut PPURegisters {
         &mut self.ppu_registers
+    }
+
+    pub fn ppu_get_nametable(&self) -> &[u8] {
+        let name_table_addr: PPUCTRL::NTABLE_ADDR::Value = self
+            .ppu_registers
+            .ppuctrl
+            .read_as_enum(PPUCTRL::NTABLE_ADDR)
+            .unwrap();
+        let nametable_mirror: Flags1::MIRRORING::Value = self
+            .cartridge_header()
+            .flags1
+            .read_as_enum(Flags1::MIRRORING)
+            .unwrap();
+        match nametable_mirror {
+            Flags1::MIRRORING::Value::VERT => match name_table_addr {
+                PPUCTRL::NTABLE_ADDR::Value::Addr2000 => &self.ppu_ram[0..],
+                PPUCTRL::NTABLE_ADDR::Value::Addr2400 => &self.ppu_ram[1024..],
+                PPUCTRL::NTABLE_ADDR::Value::Addr2800 => &self.ppu_ram[0..],
+                PPUCTRL::NTABLE_ADDR::Value::Addr2C00 => &self.ppu_ram[1024..],
+            },
+            Flags1::MIRRORING::Value::HORZ => match name_table_addr {
+                PPUCTRL::NTABLE_ADDR::Value::Addr2000 => &self.ppu_ram[0..],
+                PPUCTRL::NTABLE_ADDR::Value::Addr2400 => &self.ppu_ram[0..],
+                PPUCTRL::NTABLE_ADDR::Value::Addr2800 => &self.ppu_ram[1024..],
+                PPUCTRL::NTABLE_ADDR::Value::Addr2C00 => &self.ppu_ram[1024..],
+            },
+        }
     }
 }

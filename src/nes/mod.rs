@@ -79,11 +79,10 @@ impl eframe::App for NES {
             // Render the frame to the screen
             self.ppu
                 .draw_to_framebuffer(&mut self.screen, &mut self.bus);
+            self.screen.update_texture();
         }
 
         self.ui.render(ctx, &mut self.bus);
-        self.ppu.debug_render(&mut self.bus, &mut self.screen);
-        self.screen.update_texture();
         Window::new("Game").show(ctx, |ui| ui.add(Image::new(&self.screen.texture)));
 
         ctx.request_repaint();

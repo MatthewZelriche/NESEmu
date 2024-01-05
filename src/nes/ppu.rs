@@ -1,8 +1,15 @@
+use std::slice::Chunks;
+
 use bitfield::Bit;
 use eframe::epaint::Color32;
-use tock_registers::interfaces::ReadWriteable;
+use tock_registers::interfaces::{ReadWriteable, Readable};
 
-use super::{bus::Bus, ppu_registers::PPUSTATUS, screen::FrameBuffer};
+use super::{
+    bus::Bus,
+    ines::Flags1,
+    ppu_registers::{PPUCTRL, PPUSTATUS},
+    screen::FrameBuffer,
+};
 
 pub struct PPU {
     pub scanlines: usize,
@@ -46,12 +53,18 @@ impl PPU {
         return false;
     }
 
-    pub fn draw_to_framebuffer<T: FrameBuffer>(&self, fb: &mut T, bus: &mut Bus) {
-        self.debug_render(bus, fb)
+    pub fn draw_to_framebuffer<T: FrameBuffer>(&self, fb: &mut T, bus: &Bus) {
+        let name_table = bus.ppu_get_nametable();
+        for i in 0..960 {
+            let tile_px_x = (i % 32) * 8;
+            let tile_px_y = (i / 30) * 8;
+            let tile_idx = name_table[i];
+            self.plot_tile(tile_px_x, tile_px_y, tile_idx, &bus, fb);
+        }
     }
 
     // TODO: This can be removed at some point when we are done displaying full pattern tables
-    pub fn debug_render<T: FrameBuffer>(&self, bus: &mut Bus, fb: &mut T) {
+    pub fn debug_render<T: FrameBuffer>(&self, bus: &Bus, fb: &mut T) {
         // Render the entire pattern table
         for i in 0..256 {
             let tile_px_x = (i % 31) * 8;
@@ -65,11 +78,12 @@ impl PPU {
         tile_px_x: usize,
         tile_px_y: usize,
         pt_idx: u8,
-        bus: &mut Bus,
+        bus: &Bus,
         fb: &mut T,
     ) {
         // Get the pattern table, split into 16 byte chunks representing individual 8x8 tiles
-        let mut pattern_table = bus.ppu_get_pattern_table();
+        // TODO: Handle sprite rendering
+        let mut pattern_table = bus.ppu_get_pattern_table(true);
         let tile = pattern_table.nth(pt_idx as usize).unwrap();
 
         // Draw the tile to the framebuffer
