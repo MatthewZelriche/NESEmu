@@ -1851,7 +1851,7 @@ impl CPU {
         Ok(opcode.cycles)
     }
 
-    // TODO: This breaks everything because it performs modifying reads
+    // TODO: This is really slow
     pub fn write_opcode(&mut self, opcode: &Opcode, bus: &mut Bus) -> Result<(), &'static str> {
         let mut fmt_string = format!("{:04X}  ", self.current_instruction_addr);
 
@@ -1885,7 +1885,7 @@ impl CPU {
                     );
                 }
                 AddressMode::ZEROPAGE => {
-                    let address_value = bus.cpu_read_byte(opcode.bytes[1] as usize)?;
+                    let address_value = bus.cpu_read_byte_no_modify(opcode.bytes[1] as usize)?;
                     fmt_string = format!(
                         "{}${:02X} = {:02X}",
                         fmt_string, opcode.bytes[1], address_value
@@ -1900,7 +1900,7 @@ impl CPU {
                         opcode.bytes[1],
                         lsb_addr,
                         addr,
-                        bus.cpu_read_byte(addr)?
+                        bus.cpu_read_byte_no_modify(addr)?
                     );
                 }
                 AddressMode::INDIRECTY => {
@@ -1911,7 +1911,7 @@ impl CPU {
                         opcode.bytes[1],
                         self.fetch_indirect_y_base_addr(opcode, bus)?,
                         addr,
-                        bus.cpu_read_byte(addr)?
+                        bus.cpu_read_byte_no_modify(addr)?
                     );
                 }
                 AddressMode::ZEROPAGEX => {
@@ -1921,7 +1921,7 @@ impl CPU {
                         fmt_string,
                         opcode.bytes[1],
                         addr,
-                        bus.cpu_read_byte(addr)?
+                        bus.cpu_read_byte_no_modify(addr)?
                     );
                 }
                 AddressMode::ZEROPAGEY => {
@@ -1931,7 +1931,7 @@ impl CPU {
                         fmt_string,
                         opcode.bytes[1],
                         addr,
-                        bus.cpu_read_byte(addr)?
+                        bus.cpu_read_byte_no_modify(addr)?
                     );
                 }
                 _ => {} // should never happen
@@ -1948,7 +1948,7 @@ impl CPU {
                     fmt_string = format!("{}${:04X}", fmt_string, operand);
 
                     if mem_modify {
-                        let byte = bus.cpu_read_byte(operand as usize)?;
+                        let byte = bus.cpu_read_byte_no_modify(operand as usize)?;
                         fmt_string = format!("{} = {:02X}", fmt_string, byte);
                     }
                 }
@@ -1965,7 +1965,7 @@ impl CPU {
                         fmt_string,
                         base_addr,
                         addr,
-                        bus.cpu_read_byte(addr)?
+                        bus.cpu_read_byte_no_modify(addr)?
                     );
                 }
                 AddressMode::ABSOLUTEX => {
@@ -1976,7 +1976,7 @@ impl CPU {
                         fmt_string,
                         base_addr,
                         addr,
-                        bus.cpu_read_byte(addr)?
+                        bus.cpu_read_byte_no_modify(addr)?
                     );
                 }
 
