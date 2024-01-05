@@ -19,12 +19,14 @@ impl PPU {
         }
     }
 
-    pub fn step<T: FrameBuffer>(&mut self, bus: &mut Bus, fb: &mut T) {
+    pub fn step(&mut self, bus: &mut Bus) -> bool {
         self.dots += 1;
         if self.dots == PPU::DOTS_PER_SCANLINE {
             self.scanlines += 1;
             if self.scanlines >= PPU::NUM_SCANLINES {
                 self.scanlines = 0;
+                // We just finished a frame
+                return true;
             }
         }
         self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
@@ -41,10 +43,15 @@ impl PPU {
                 .ppustatus
                 .modify(PPUSTATUS::VBLANK::CLEAR);
         }
+        return false;
+    }
+
+    pub fn draw_to_framebuffer<T: FrameBuffer>(&self, fb: &mut T, bus: &mut Bus) {
+        self.debug_render(bus, fb)
     }
 
     // TODO: This can be removed at some point when we are done displaying full pattern tables
-    pub fn debug_render<T: FrameBuffer>(&mut self, bus: &mut Bus, fb: &mut T) {
+    pub fn debug_render<T: FrameBuffer>(&self, bus: &mut Bus, fb: &mut T) {
         // Render the entire pattern table
         for i in 0..256 {
             let tile_px_x = (i % 31) * 8;
@@ -81,8 +88,8 @@ impl PPU {
                     match palette_idx {
                         0 => Color32::BLACK,
                         1 => Color32::WHITE,
-                        2 => Color32::BLUE,
-                        3 => Color32::RED,
+                        2 => Color32::LIGHT_GRAY,
+                        3 => Color32::DARK_GRAY,
                         _ => panic!(),
                     },
                 );
