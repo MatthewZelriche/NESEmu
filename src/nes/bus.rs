@@ -5,7 +5,7 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 use super::{
     cartridge::Cartridge,
-    ppu_registers::{PPURegisters, PPUSTATUS},
+    ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
 };
 
 pub struct Bus {
@@ -109,7 +109,23 @@ impl Bus {
                 }
                 Ok(())
             }
-            (0x2003..=0x2007) => todo!(
+            0x2007 => match self.ppu_registers.ppuaddr {
+                // TODO: Thigns like CHRRAM and other scenarios where the CPU
+                // can write to something thats not a nametable
+                (0x2000..=0x2FFF) => {
+                    self.ppu_ram[(self.ppu_registers.ppuaddr - 0x2000) as usize] = value;
+                    if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
+                        // TODO: Does this need a wrapping add?
+                        self.ppu_registers.ppuaddr += 32;
+                    } else {
+                        self.ppu_registers.ppuaddr += 1;
+                    }
+
+                    Ok(())
+                }
+                _ => Err("Bad write to PPU Bus by CPU"),
+            },
+            (0x2003..=0x2005) => todo!(
                 "Attempt to write register: 0x{:X}, ppuaddr: {:X}",
                 address,
                 self.ppu_registers.ppuaddr

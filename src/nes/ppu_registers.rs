@@ -47,6 +47,7 @@ pub struct PPURegisters {
     pub ppumask: InMemoryRegister<u8, PPUMASK::Register>,
     pub ppustatus: InMemoryRegister<u8, PPUSTATUS::Register>,
     pub ppuaddr: u16,
+    pub ppudata: u8,
     pub write_latch: bool,
 }
 
@@ -57,6 +58,7 @@ impl Default for PPURegisters {
             ppumask: InMemoryRegister::new(0),
             ppustatus: InMemoryRegister::new(0),
             ppuaddr: 0,
+            ppudata: 0,
             write_latch: false,
         }
     }
