@@ -1313,8 +1313,12 @@ impl CPU {
                 let base_addr = self.fetch_absolute_base_addr(opcode);
                 // Have to emulate a cpu bug with indirect mode
                 let base_addr_msb_wrap = CPU::PAGE_SZ_MASK & base_addr;
-                let base_addr_msb =
-                    (((base_addr + 1) % base_addr_msb_wrap) as u8) as usize | base_addr_msb_wrap;
+                // Don't attempt a division by zero under certain circumstances
+                let base_addr_msb = if base_addr_msb_wrap != 0 {
+                    (((base_addr + 1) % base_addr_msb_wrap) as u8) as usize | base_addr_msb_wrap
+                } else {
+                    base_addr + 1
+                };
                 let addr_bytes = [
                     bus.cpu_read_byte(base_addr)?,
                     bus.cpu_read_byte(base_addr_msb)?,
