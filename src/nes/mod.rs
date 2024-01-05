@@ -27,6 +27,7 @@ pub struct NES {
     ui: UI,
     halt: bool,
     screen: Screen,
+    pending_interrupt: bool,
 }
 
 impl NES {
@@ -40,6 +41,7 @@ impl NES {
             ui: UI::new(),
             halt: false,
             screen: Screen::new(cc.egui_ctx.clone()),
+            pending_interrupt: false,
         })
     }
 }
@@ -51,7 +53,8 @@ impl eframe::App for NES {
             // Since we don't have a PPU generating frames yet
             // we can just fake roughly how many cycles should be executed per frame
             loop {
-                match self.cpu.step(&mut self.bus) {
+                self.pending_interrupt = self.ppu.generated_interrupt();
+                match self.cpu.step(&mut self.bus, &mut self.pending_interrupt) {
                     Ok(_) => {
                         // 3 cycles per CPU cycle
                         for _ in 0..3 {
