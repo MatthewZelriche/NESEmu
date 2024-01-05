@@ -93,12 +93,8 @@ impl CPU {
             // for later, when we print to the log
             self.old_register_state = self.registers.clone();
             // Fetch the opcode
-            // Throw a BRK instruction is we can't read the opcode memory location
-            // TODO: Better way of handling this?
             self.current_instruction_addr = self.registers.program_counter;
-            let opcode = bus
-                .cpu_read_byte(self.current_instruction_addr)
-                .unwrap_or(0x0);
+            let opcode = bus.cpu_read_byte(self.current_instruction_addr)?;
             self.registers.program_counter += 1;
             let cycle_count = self.execute_opcode(opcode, bus)?;
             self.total_cycles += cycle_count as usize;
