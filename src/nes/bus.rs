@@ -97,6 +97,11 @@ impl Bus {
             0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
             0x2001 => Ok(self.ppu_registers.ppustatus.set(value)),
             0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
+            0x2005 => {
+                // TODO: Implement scrolling
+                // Just add dummy stuff here for now to get it functioning
+                Ok(())
+            }
             0x2006 => {
                 if !self.ppu_registers.write_latch {
                     self.ppu_registers.ppuaddr.set_bit_range(15, 8, value);
@@ -125,7 +130,7 @@ impl Bus {
                 }
                 _ => Err("Bad write to PPU Bus by CPU"),
             },
-            (0x2003..=0x2005) => todo!(
+            (0x2003..=0x2004) => todo!(
                 "Attempt to write register: 0x{:X}, ppuaddr: {:X}",
                 address,
                 self.ppu_registers.ppuaddr
