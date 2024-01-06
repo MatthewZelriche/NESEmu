@@ -1,8 +1,12 @@
 use bitfield::Bit;
 use eframe::epaint::Color32;
-use tock_registers::interfaces::ReadWriteable;
+use tock_registers::interfaces::{ReadWriteable, Readable};
 
-use super::{bus::Bus, ppu_registers::PPUSTATUS, screen::FrameBuffer};
+use super::{
+    bus::Bus,
+    ppu_registers::{PPUCTRL, PPUSTATUS},
+    screen::FrameBuffer,
+};
 
 pub struct PPU {
     pub scanlines: usize,
@@ -38,7 +42,8 @@ impl PPU {
             bus.ppu_get_registers()
                 .ppustatus
                 .modify(PPUSTATUS::VBLANK::SET);
-            self.generated_interrupt = true;
+            self.generated_interrupt =
+                true && bus.ppu_get_registers().ppuctrl.is_set(PPUCTRL::NMI_ENABLE);
         } else if self.scanlines == 261 && self.dots == 1 {
             // Pre-render scanline...
             bus.ppu_get_registers()
