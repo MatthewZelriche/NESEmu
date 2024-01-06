@@ -50,7 +50,13 @@ impl Bus {
     // We need a way to query memory while ensuring this doesn't happen
     pub fn cpu_read_byte_no_modify(&mut self, address: usize) -> Result<u8, &'static str> {
         match address {
+            (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
             (0x2000..=0x3FFF) => self.cpu_read_ppu_register(address, false),
+            (0x4000..=0x4017) => Ok(0x0), // TODO: APU
+            (0x4020..=0xFFFF) => {
+                let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
+                Ok(self.cartridge.get_prg_rom()[prg_addr])
+            }
             _ => Err("Bad address read on Bus"),
         }
     }
