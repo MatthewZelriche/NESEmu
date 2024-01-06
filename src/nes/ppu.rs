@@ -57,7 +57,7 @@ impl PPU {
         let name_table = bus.ppu_get_nametable();
         for i in 0..960 {
             let tile_px_x = (i % 32) * 8;
-            let tile_px_y = (i / 30) * 8;
+            let tile_px_y = (i / 32) * 8;
             let tile_idx = name_table[i];
             self.plot_tile(tile_px_x, tile_px_y, tile_idx, &bus, fb);
         }
