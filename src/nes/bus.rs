@@ -99,11 +99,40 @@ impl Bus {
                 }
                 Ok(val)
             }
-            0x2003 => Ok(0x0),                        // TODO
-            0x2004 => Ok(0x0),                        // TODO
-            0x2005 => Ok(0x0),                        // TODO
-            0x2006 => todo!(),                        // How to handle this? It's two bytes
-            0x2007 => Ok(self.ppu_registers.ppudata), // TODO: Not correct
+            0x2003 => Ok(0x0), // TODO
+            0x2004 => Ok(0x0), // TODO
+            0x2005 => Ok(0x0), // TODO
+            0x2006 => todo!(), // How to handle this? It's two bytes
+            0x2007 => {
+                let final_res = match self.ppu_registers.ppuaddr {
+                    (0..=0x1FFF) => {
+                        // Buffered read
+                        let res = self.ppu_registers.ppudata;
+                        // Then fetch new data
+                        self.ppu_registers.ppudata =
+                            self.cartridge.get_chr_rom()[self.ppu_registers.ppuaddr as usize];
+                        Ok(res)
+                    }
+                    (0x2000..=0x2FFF) => {
+                        // Buffered read
+                        let res = self.ppu_registers.ppudata;
+                        // Then fetch new data
+                        self.ppu_registers.ppudata =
+                            self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)];
+                        Ok(res)
+                    }
+                    (0x3F00..=0x3FFF) => {
+                        // No buffered read
+                        Ok(self
+                            .palette_memory
+                            .get_entry(0x3F00 | (self.ppu_registers.ppuaddr as usize % 0x20)))
+                    }
+                    _ => return Err("Bad read from PPU Bus by CPU"),
+                };
+
+                self.ppu_increment_vram_ptr();
+                final_res
+            }
             _ => Err("Bad Read on PPU register"),
         }
     }
@@ -153,16 +182,20 @@ impl Bus {
                     _ => return Err("Bad write to PPU Bus by CPU"),
                 };
 
-                if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
-                    // TODO: Does this need a wrapping add?
-                    self.ppu_registers.ppuaddr += 32;
-                } else {
-                    self.ppu_registers.ppuaddr += 1;
-                }
+                self.ppu_increment_vram_ptr();
 
                 Ok(())
             }
             _ => Err("Bad Write on PPU Register"),
+        }
+    }
+
+    fn ppu_increment_vram_ptr(&mut self) {
+        if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
+            // TODO: Does this need a wrapping add?
+            self.ppu_registers.ppuaddr += 32;
+        } else {
+            self.ppu_registers.ppuaddr += 1;
         }
     }
 
