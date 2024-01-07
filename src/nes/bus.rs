@@ -6,6 +6,7 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 use super::{
     cartridge::Cartridge,
     ines::{Flags1, INESHeader},
+    palette_memory::PaletteMemory,
     ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
 };
 
@@ -14,6 +15,7 @@ pub struct Bus {
     cpu_ram: [u8; 2048],
     ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
     ppu_registers: PPURegisters,
+    pub palette_memory: PaletteMemory,
 }
 
 impl Bus {
@@ -24,6 +26,7 @@ impl Bus {
             // makes us init it
             ppu_ram: [0u8; 2048],
             ppu_registers: PPURegisters::default(),
+            palette_memory: PaletteMemory::new(),
         })
     }
 }
@@ -84,6 +87,8 @@ impl Bus {
         modify: bool,
     ) -> Result<u8, &'static str> {
         match address {
+            0x2000 => Ok(self.ppu_registers.ppuctrl.get()),
+            0x2001 => Ok(self.ppu_registers.ppumask.get()),
             0x2002 => {
                 let val = self.ppu_registers.ppustatus.get();
                 if modify {
@@ -94,10 +99,11 @@ impl Bus {
                 }
                 Ok(val)
             }
-            0x2003 => todo!(),
-            0x2004 => Ok(0x0), // TODO
-            (0x2005..=0x2006) => todo!(),
-            0x2007 => Ok(0x0), // TODO
+            0x2003 => Ok(0x0),                        // TODO
+            0x2004 => Ok(0x0),                        // TODO
+            0x2005 => Ok(0x0),                        // TODO
+            0x2006 => todo!(),                        // How to handle this? It's two bytes
+            0x2007 => Ok(self.ppu_registers.ppudata), // TODO: Not correct
             _ => Err("Bad Read on PPU register"),
         }
     }
@@ -130,23 +136,32 @@ impl Bus {
                 }
                 Ok(())
             }
-            0x2007 => match self.ppu_registers.ppuaddr {
-                // TODO: Thigns like CHRRAM and other scenarios where the CPU
-                // can write to something thats not a nametable
-                (0x2000..=0x2FFF) => {
-                    self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)] = value;
-                    if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
-                        // TODO: Does this need a wrapping add?
-                        self.ppu_registers.ppuaddr += 32;
-                    } else {
-                        self.ppu_registers.ppuaddr += 1;
+            0x2007 => {
+                match self.ppu_registers.ppuaddr {
+                    // TODO: Thigns like CHRRAM and other scenarios where the CPU
+                    // can write to something thats not a nametable
+                    (0x2000..=0x2FFF) => {
+                        self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)] =
+                            value;
                     }
+                    (0x3F00..=0x3FFF) => {
+                        self.palette_memory.set_entry(
+                            0x3F00 | (self.ppu_registers.ppuaddr as usize % 0x20),
+                            value,
+                        );
+                    }
+                    _ => return Err("Bad write to PPU Bus by CPU"),
+                };
 
-                    Ok(())
+                if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
+                    // TODO: Does this need a wrapping add?
+                    self.ppu_registers.ppuaddr += 32;
+                } else {
+                    self.ppu_registers.ppuaddr += 1;
                 }
-                (0x3F00..=0x3FFF) => Ok(()), // TODO: Palette memory
-                _ => Err("Bad write to PPU Bus by CPU"),
-            },
+
+                Ok(())
+            }
             _ => Err("Bad Write on PPU Register"),
         }
     }

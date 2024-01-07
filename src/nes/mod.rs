@@ -14,6 +14,7 @@ mod ines;
 mod instruction;
 mod mappers;
 mod palette;
+mod palette_memory;
 mod ppu;
 mod ppu_registers;
 mod screen;
