@@ -85,6 +85,7 @@ impl Bus {
             0x4016 => Ok(self.controller.write_to_controller(value.bit(0))),
             0x4017 => Ok(()), // Currently not supported
             (0x2000..=0x3FFF) => self.cpu_write_ppu_register(address, value),
+            (0x4020..=0xFFFF) => self.cartridge.mapper.write_register(address, value),
             _ => Err("Bad address write on Bus"),
         }
     }

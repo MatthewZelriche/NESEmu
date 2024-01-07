@@ -435,6 +435,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::lsr,
             }),
+            0x58 => Ok(Opcode {
+                mnemonic: "CLI",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::cli,
+            }),
             0x59 => Ok(Opcode {
                 mnemonic: "EOR",
                 mode: AddressMode::ABSOLUTEY,
@@ -1458,6 +1466,13 @@ impl CPU {
 
     fn clc(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
         self.registers.status_register.modify(Status::CARRY::CLEAR);
+        Ok(opcode.cycles)
+    }
+
+    fn cli(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::INT_DISABLE::CLEAR);
         Ok(opcode.cycles)
     }
 
