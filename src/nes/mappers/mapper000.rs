@@ -30,7 +30,8 @@ impl Mapper for Mapper000 {
         }
     }
 
-    fn write_register(&mut self, _: u16, _: u8) -> bool {
-        return false;
+    fn write_register(&mut self, _: usize, _: u8) -> Result<(), &'static str> {
+        // Mapper zero means writing to prg rom is a no-op
+        return Ok(());
     }
 }

@@ -128,6 +128,6 @@ mod tests {
         // Validate mapper is working correctly
         assert_eq!(cartridge.mapper.map_prg_address(0xFFFC).unwrap(), 0x3FFC);
         assert_eq!(cartridge.mapper.map_prg_address(0xC000).unwrap(), 0x0000);
-        assert_eq!(cartridge.mapper.write_register(0xC000, 0), false);
+        assert_eq!(cartridge.mapper.write_register(0xC000, 0), Ok(()));
     }
 }
