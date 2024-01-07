@@ -1,10 +1,11 @@
 use std::{io::Error, slice::Chunks};
 
-use bitfield::BitRangeMut;
+use bitfield::{Bit, BitRangeMut};
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 use super::{
     cartridge::Cartridge,
+    controller::Controller,
     ines::{Flags1, INESHeader},
     palette_memory::PaletteMemory,
     ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
@@ -16,6 +17,7 @@ pub struct Bus {
     ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
     ppu_registers: PPURegisters,
     pub palette_memory: PaletteMemory,
+    pub controller: Controller,
 }
 
 impl Bus {
@@ -27,6 +29,7 @@ impl Bus {
             ppu_ram: [0u8; 2048],
             ppu_registers: PPURegisters::default(),
             palette_memory: PaletteMemory::new(),
+            controller: Controller::new(),
         })
     }
 }
@@ -40,7 +43,9 @@ impl Bus {
         match address {
             (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
             (0x2000..=0x3FFF) => self.cpu_read_ppu_register(address, true),
-            (0x4000..=0x4017) => Ok(0x0), // TODO: APU
+            (0x4000..=0x4015) => Ok(0x0), // TODO: APU
+            0x4016 => Ok(self.controller.read_from_controller()),
+            0x4017 => Ok(0x0), // Currently not supported
             (0x4020..=0xFFFF) => {
                 let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
                 Ok(self.cartridge.get_prg_rom()[prg_addr])
@@ -56,6 +61,7 @@ impl Bus {
             (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
             (0x2000..=0x3FFF) => self.cpu_read_ppu_register(address, false),
             (0x4000..=0x4017) => Ok(0x0), // TODO: APU
+            // TODO: Controller
             (0x4020..=0xFFFF) => {
                 let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
                 Ok(self.cartridge.get_prg_rom()[prg_addr])
@@ -75,7 +81,9 @@ impl Bus {
     pub fn cpu_write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
         match address {
             (0..=2048) => Ok(self.cpu_ram[address] = value),
-            (0x4000..=0x4017) => Ok(()), // TODO: APU
+            (0x4000..=0x4015) => Ok(()), // TODO: APU
+            0x4016 => Ok(self.controller.write_to_controller(value.bit(0))),
+            0x4017 => Ok(()), // Currently not supported
             (0x2000..=0x3FFF) => self.cpu_write_ppu_register(address, value),
             _ => Err("Bad address write on Bus"),
         }
