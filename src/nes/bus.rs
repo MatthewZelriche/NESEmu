@@ -158,8 +158,13 @@ impl Bus {
             0x2003 => Ok(()), // TODO
             0x2004 => Ok(()), // TODO
             0x2005 => {
-                // TODO: Implement scrolling
-                // Just add dummy stuff here for now to get it functioning
+                if !self.ppu_registers.write_latch {
+                    self.ppu_registers.fine_x = value;
+                    self.ppu_registers.write_latch = true;
+                } else {
+                    self.ppu_registers.fine_y = value;
+                    self.ppu_registers.write_latch = false;
+                }
                 Ok(())
             }
             0x2006 => {
@@ -226,8 +231,12 @@ impl Bus {
         }
     }
 
-    pub fn ppu_get_registers(&mut self) -> &mut PPURegisters {
+    pub fn ppu_get_registers_mut(&mut self) -> &mut PPURegisters {
         &mut self.ppu_registers
+    }
+
+    pub fn ppu_get_registers(&self) -> &PPURegisters {
+        &self.ppu_registers
     }
 
     pub fn ppu_get_nametable(&self) -> &[u8] {

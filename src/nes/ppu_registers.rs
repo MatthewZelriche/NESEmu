@@ -49,6 +49,8 @@ pub struct PPURegisters {
     pub ppuaddr: u16,
     pub ppudata: u8,
     pub write_latch: bool,
+    pub fine_x: u8,
+    pub fine_y: u8,
 }
 
 impl Default for PPURegisters {
@@ -59,6 +61,8 @@ impl Default for PPURegisters {
             ppustatus: InMemoryRegister::new(0),
             ppuaddr: 0,
             ppudata: 0,
+            fine_x: 0,
+            fine_y: 0,
             write_latch: false,
         }
     }

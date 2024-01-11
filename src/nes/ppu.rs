@@ -42,14 +42,17 @@ impl PPU {
 
         // Handle vblank
         if self.scanlines == 241 && self.dots == 1 {
-            bus.ppu_get_registers()
+            bus.ppu_get_registers_mut()
                 .ppustatus
                 .modify(PPUSTATUS::VBLANK::SET);
-            self.generated_interrupt =
-                true && bus.ppu_get_registers().ppuctrl.is_set(PPUCTRL::NMI_ENABLE);
+            self.generated_interrupt = true
+                && bus
+                    .ppu_get_registers_mut()
+                    .ppuctrl
+                    .is_set(PPUCTRL::NMI_ENABLE);
         } else if self.scanlines == 261 && self.dots == 1 {
             // Pre-render scanline...
-            bus.ppu_get_registers()
+            bus.ppu_get_registers_mut()
                 .ppustatus
                 .modify(PPUSTATUS::VBLANK::CLEAR);
         }
@@ -57,16 +60,27 @@ impl PPU {
     }
 
     pub fn draw_to_framebuffer<T: FrameBuffer>(&mut self, fb: &mut T, bus: &Bus) {
+        // Calculate starting coarse x and y from fine x and y
+        let fine_x = bus.ppu_get_registers().fine_x as u16;
+        let fine_y = bus.ppu_get_registers().fine_y as u16;
+        let start = (((fine_y / 8) * 32) + (fine_x / 8)) as usize;
+
         let name_table = bus.ppu_get_nametable();
         let attribute_table = &name_table[960..1024];
-        for i in 0..960 {
+
+        let mut curr_fine_x: usize = 0;
+        let mut curr_fine_y: usize = 0;
+        for i in start..960 {
             self.tile_x = (i as u16).bit_range(4, 0);
             self.tile_y = (i as u16).bit_range(9, 5);
-            let tile_px_x = (i % 32) * 8;
-            let tile_px_y = (i / 32) * 8;
             let tile_idx = name_table[i];
             let palette_idx = self.compute_palette_index(attribute_table);
-            self.plot_tile(tile_px_x, tile_px_y, tile_idx, palette_idx, &bus, fb);
+            self.plot_tile(curr_fine_x, curr_fine_y, tile_idx, palette_idx, &bus, fb);
+            curr_fine_x += 8;
+            if curr_fine_x > 8 * 31 {
+                curr_fine_y += 8;
+                curr_fine_x = 0;
+            }
         }
     }
 
