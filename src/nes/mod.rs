@@ -1,4 +1,7 @@
-use std::io::{Error, ErrorKind};
+use std::{
+    io::{Error, ErrorKind},
+    time::{Duration, Instant},
+};
 
 use bitfield::BitMut;
 use eframe::{
@@ -31,9 +34,11 @@ pub struct NES {
     halt: bool,
     screen: Screen,
     pending_interrupt: bool,
+    frame_start: Instant,
 }
 
 impl NES {
+    const FRAME_TIME: f64 = 1.0 / 60.098814;
     pub fn new(rom_path: &str, cc: &CreationContext) -> Result<Self, Error> {
         let mut bus = Bus::new(rom_path)?;
         let cpu = CPU::new(&mut bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
@@ -45,6 +50,7 @@ impl NES {
             halt: false,
             screen: Screen::new(cc.egui_ctx.clone()),
             pending_interrupt: false,
+            frame_start: Instant::now(),
         })
     }
 
@@ -94,9 +100,9 @@ impl eframe::App for NES {
             loop {
                 self.pending_interrupt = self.ppu.generated_interrupt();
                 match self.cpu.step(&mut self.bus, &mut self.pending_interrupt) {
-                    Ok(_) => {
+                    Ok(cycles) => {
                         // 3 cycles per CPU cycle
-                        for _ in 0..3 {
+                        for _ in 0..(3 * cycles) {
                             // Detect when the GPU finished all of its scanlines and
                             // looped back over to scanline 0
                             let res = self.ppu.step(&mut self.bus);
@@ -128,5 +134,13 @@ impl eframe::App for NES {
         Window::new("Game").show(ctx, |ui| ui.add(Image::new(&self.screen.texture)));
 
         ctx.request_repaint();
+
+        let ft = Duration::from_secs_f64(NES::FRAME_TIME);
+        let duration = Instant::now() - self.frame_start;
+        if ft > duration {
+            spin_sleep::sleep(ft - duration);
+        }
+
+        self.frame_start = Instant::now();
     }
 }

@@ -87,32 +87,26 @@ impl CPU {
         &mut self,
         bus: &mut Bus,
         pending_interrupt: &mut bool,
-    ) -> Result<(), &'static str> {
-        if self.cycles_remaining != 0 {
-            self.cycles_remaining -= 1;
-            Ok(())
-        } else {
-            // The nestest log requires the cpu register state PRIOR to executing
-            // the instruction, so we copy the current state of the registers
-            // for later, when we print to the log
-            self.old_register_state = self.registers.clone();
-            if *pending_interrupt {
-                *pending_interrupt = false;
-                self.handle_irq(bus)?;
-                return Ok(());
-            }
-            // Fetch the opcode
-            self.current_instruction_addr = self.registers.program_counter;
-            let opcode = bus.cpu_read_byte(self.current_instruction_addr)?;
-            self.registers.program_counter += 1;
-            let cycle_count = self.execute_opcode(opcode, bus)?;
-            self.total_cycles += cycle_count as usize;
-            self.cycles_remaining = cycle_count - 1;
-            Ok(())
+    ) -> Result<u8, &'static str> {
+        // The nestest log requires the cpu register state PRIOR to executing
+        // the instruction, so we copy the current state of the registers
+        // for later, when we print to the log
+        self.old_register_state = self.registers.clone();
+        if *pending_interrupt {
+            *pending_interrupt = false;
+            return self.handle_irq(bus);
         }
+        // Fetch the opcode
+        self.current_instruction_addr = self.registers.program_counter;
+        let opcode = bus.cpu_read_byte(self.current_instruction_addr)?;
+        self.registers.program_counter += 1;
+        let cycle_count = self.execute_opcode(opcode, bus)?;
+        self.total_cycles += cycle_count as usize;
+        self.cycles_remaining = cycle_count - 1;
+        Ok(cycle_count)
     }
 
-    pub fn handle_irq(&mut self, bus: &mut Bus) -> Result<(), &'static str> {
+    pub fn handle_irq(&mut self, bus: &mut Bus) -> Result<u8, &'static str> {
         // TODO: This doesn't support IRQs which arent NMIs
 
         // big endian because we need to push to the stack in reverse order of how they should be
@@ -130,7 +124,7 @@ impl CPU {
         bus.cpu_read_exact(0xFFFA, &mut interrupt_vector)?;
         self.registers.program_counter = u16::from_le_bytes(interrupt_vector) as usize;
         self.total_cycles += 7;
-        Ok(())
+        Ok(8)
     }
 
     pub fn will_cross_boundary(old_pc: usize, new_pc: usize) -> bool {
