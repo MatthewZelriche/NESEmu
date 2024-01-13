@@ -47,7 +47,7 @@ impl NES {
             ppu: PPU::new(),
             bus,
             ui: UI::new(),
-            halt: false,
+            halt: true,
             screen: Screen::new(cc.egui_ctx.clone()),
             pending_interrupt: false,
             frame_start: Instant::now(),
@@ -55,9 +55,13 @@ impl NES {
     }
 
     // TODO: Dehardcode keys
-    pub fn handle_window_input(&self, ctx: &eframe::egui::Context) -> InputEvent {
+    pub fn handle_window_input(&mut self, ctx: &eframe::egui::Context) -> InputEvent {
         let mut event = InputEvent { input_state: 0 };
         ctx.input(|info| {
+            if info.key_pressed(Key::P) {
+                self.halt = !self.halt;
+            }
+
             event
                 .input_state
                 .set_bit(InputEvent::RIGHT as usize, info.key_down(Key::ArrowRight));
@@ -89,9 +93,8 @@ impl NES {
 
 impl eframe::App for NES {
     fn update(&mut self, ctx: &eframe::egui::Context, _: &mut eframe::Frame) {
-        self.bus
-            .controller
-            .set_state_from_window(self.handle_window_input(ctx));
+        let input_event = self.handle_window_input(ctx);
+        self.bus.controller.set_state_from_window(input_event);
 
         let mut did_finish_frame = false;
         if !self.halt {
