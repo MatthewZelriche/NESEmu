@@ -8,6 +8,9 @@ use super::{
 };
 
 pub struct PPU {
+    nametable_addr: u16,
+    x_scroll: u8,
+    y_scroll: u8,
     pub scanlines: usize,
     pub dots: usize,
     generated_interrupt: bool,
@@ -18,23 +21,35 @@ impl PPU {
     const NUM_SCANLINES: usize = 262;
     pub fn new() -> Self {
         Self {
+            nametable_addr: 0x2000,
+            x_scroll: 0,
+            y_scroll: 0,
             scanlines: 0,
             dots: 21, // Simulates power-up delay
             generated_interrupt: false,
         }
     }
 
-    pub fn step(&mut self, bus: &mut Bus) -> bool {
+    pub fn step<T: FrameBuffer>(&mut self, fb: &mut T, bus: &mut Bus) -> bool {
+        // Each step processes a single dot/pixel
+        // Though in reality we don't render under the scanline is finished
         self.dots += 1;
+
         if self.dots == PPU::DOTS_PER_SCANLINE {
+            // We just completed a scanline, render it
+            // Don't bother drawing to the overdraw scanlines, they will never be seen anyway
+            if self.scanlines <= 239 {
+                self.draw_scanline(fb, bus);
+            }
             self.scanlines += 1;
+            self.dots = 0;
+
             if self.scanlines >= PPU::NUM_SCANLINES {
-                self.scanlines = 0;
                 // We just finished a frame
+                self.prepare_next_frame(bus);
                 return true;
             }
         }
-        self.dots = self.dots % PPU::DOTS_PER_SCANLINE;
 
         // Handle vblank
         if self.scanlines == 241 && self.dots == 1 {
@@ -55,64 +70,94 @@ impl PPU {
         return false;
     }
 
-    pub fn draw_to_framebuffer<T: FrameBuffer>(&mut self, fb: &mut T, bus: &Bus) {
-        // Compute the start index into the current nametable
-        let start_fine_x = bus.ppu_get_registers().fine_x as u16;
-        let start_fine_y = bus.ppu_get_registers().fine_y as u16;
-        let nametable_start_idx = (((start_fine_y / 8) * 32) + (start_fine_x / 8)) as usize;
+    fn prepare_next_frame(&mut self, bus: &mut Bus) {
+        self.scanlines = 0;
+        // Update x_scroll and y_scroll
+        // My understanding is that programs are meant to change these only during vblank,
+        // so it should be safe to check them only once per frame
+        self.y_scroll = bus.ppu_get_registers().fine_y;
+        self.x_scroll = bus.ppu_get_registers().fine_x;
 
-        // Compute the start address from the start index
-        let mut nametable_addr = (bus.ppu_get_nametable_base_addr() + nametable_start_idx) as u16;
+        // Reconstruct the starting address of the nametable based on PPUSCROLL
+        let nametable_start_idx =
+            ((((self.y_scroll as usize) / 8) * 32) + (self.x_scroll as usize / 8)) as usize;
+        self.nametable_addr = (bus.ppu_get_nametable_base_addr() + nametable_start_idx) as u16;
+    }
 
-        let mut curr_px_x = 0;
-        let mut curr_px_y = 0;
-        let fine_offset_x = (start_fine_x % 8) as usize;
-        let fine_offset_y = (start_fine_y % 8) as usize;
-        for _ in 0..960 + 32 {
-            let tile_idx = bus.ppu_read_nametable(nametable_addr as usize).unwrap();
+    // TODO: Handle sprite rendering
+    pub fn draw_scanline<T: FrameBuffer>(&mut self, fb: &mut T, bus: &mut Bus) {
+        let pixel_space_y = self.scanlines;
+
+        // x and y scroll represent the nametable pixel coordinate that is to be situated at the top-left
+        // corner of the screen.
+        // However, we also need "wrapped" versions of these coordinates which represent offsets into an
+        // individual 8x8 pixel nametable entry
+        let mut fine_x_wrapped = self.x_scroll % 8;
+        let fine_y_wrapped = self.y_scroll % 8;
+
+        let coarse_y = (self.nametable_addr as u16).bit_range(9, 5);
+
+        for pixel_space_x in 0..256 {
+            // Compute pattern table idx and palette idx
             // This monstrosity taken from https://www.nesdev.org/wiki/PPU_scrolling#Wrapping_around
             let attrib_table_addr = 0x23C0
-                | (nametable_addr & 0x0C00)
-                | ((nametable_addr >> 4) & 0x38)
-                | ((nametable_addr >> 2) & 0x07);
+                | (self.nametable_addr & 0x0C00)
+                | ((self.nametable_addr >> 4) & 0x38)
+                | ((self.nametable_addr >> 2) & 0x07);
             let attrib_table_val = bus.ppu_read_nametable(attrib_table_addr as usize).unwrap();
-            let coarse_x = (nametable_addr as u16).bit_range(4, 0);
-            let coarse_y = (nametable_addr as u16).bit_range(9, 5);
-            let palette_idx = self.compute_palette_index(attrib_table_val, coarse_x, coarse_y);
-            self.plot_tile(
-                curr_px_x,
-                curr_px_y,
-                fine_offset_x,
-                fine_offset_y,
-                tile_idx,
-                palette_idx,
-                &bus,
-                fb,
-            );
+            let coarse_x = (self.nametable_addr as u16).bit_range(4, 0);
+            let pt_idx = bus
+                .ppu_read_nametable(self.nametable_addr as usize)
+                .unwrap();
+            let palette_num = self.compute_palette_index(attrib_table_val, coarse_x, coarse_y);
 
-            // Update address for next tile render
-            curr_px_x += 8;
-            if coarse_x == 31 {
-                nametable_addr.set_bit_range(4, 0, 0); // Reset coarse x to zero
-                                                       // Flip bit to switch horz nametable
-                nametable_addr.set_bit(10, !(nametable_addr as u16).bit(10));
-            } else {
-                //nametable_addr += 1; // increment course x
-                nametable_addr.set_bit_range(4, 0, coarse_x + 1);
-            }
-            if curr_px_x > 8 * 31 {
-                curr_px_y += 8;
-                curr_px_x = 0;
+            // Get the chr tile data, a 16 byte chunk representing an individual 8x8 tile
+            let mut pattern_table = bus.ppu_get_pattern_table(true);
+            let tile = pattern_table.nth(pt_idx as usize).unwrap();
+            // Compute palette color
+            // Read the palette idx data from both bitplanes in the tile
+            let bit_idx = 7 - (fine_x_wrapped); // Flip the bit index so we go from left to right over the bits
+            let y_tile_idx = (fine_y_wrapped as usize + pixel_space_y) % 8;
+            let low_bit = u8::from(tile[y_tile_idx as usize].bit(bit_idx as usize));
+            let high_bit = u8::from(tile[(y_tile_idx + 8) as usize].bit(bit_idx as usize));
+            let palette_idx = low_bit + (high_bit << 1);
+            let color = bus
+                .palette_memory
+                .get_color_by_idx(palette_num, palette_idx)
+                .unwrap();
 
-                if coarse_y == 29 {
-                    nametable_addr.set_bit_range(9, 5, 0); // Reset coarse y to zero
-                                                           // Flip bit to switch vert nametable
-                    nametable_addr.set_bit(11, !(nametable_addr as u16).bit(11));
-                } else if coarse_y == 31 {
-                    nametable_addr.set_bit_range(9, 5, 0); // Reset coarse y to zero
+            // Write pixel color into the fb
+            fb.plot_pixel(pixel_space_x, pixel_space_y, color);
+
+            // Handle offset x wrapping into the nametable entry
+            fine_x_wrapped += 1;
+            if fine_x_wrapped > 7 {
+                fine_x_wrapped = 0;
+
+                // Increment Coarse X
+                if coarse_x == 31 {
+                    self.nametable_addr.set_bit_range(4, 0, 0); // Wrap Coarse X to zero
+                                                                // Flip bit to switch horz nametable
+                    self.nametable_addr
+                        .set_bit(10, !(self.nametable_addr as u16).bit(10));
                 } else {
-                    nametable_addr.set_bit_range(9, 5, coarse_y + 1);
+                    self.nametable_addr.set_bit_range(4, 0, coarse_x + 1);
                 }
+            }
+        }
+
+        // If our y coordinate is about to enter a new nametable entry...
+        if (self.y_scroll as usize + pixel_space_y) % 8 == 7 {
+            // Increment Coarse Y
+            if coarse_y == 29 {
+                self.nametable_addr.set_bit_range(9, 5, 0); // Wrap coarse y to zero
+                                                            // Flip bit to switch vert nametable
+                self.nametable_addr
+                    .set_bit(11, !(self.nametable_addr as u16).bit(11));
+            } else if coarse_y == 31 {
+                self.nametable_addr.set_bit_range(9, 5, 0);
+            } else {
+                self.nametable_addr.set_bit_range(9, 5, coarse_y + 1);
             }
         }
     }
@@ -125,41 +170,6 @@ impl PPU {
             (false, true) => attrib_value.bit_range(3, 2),
             (true, false) => attrib_value.bit_range(5, 4),
             (true, true) => attrib_value.bit_range(7, 6),
-        }
-    }
-
-    fn plot_tile<T: FrameBuffer>(
-        &self,
-        tile_px_x: usize,
-        tile_px_y: usize,
-        fine_offset_x: usize,
-        fine_offset_y: usize,
-        pt_idx: u8,
-        palette_num: u8,
-        bus: &Bus,
-        fb: &mut T,
-    ) {
-        // Get the pattern table, split into 16 byte chunks representing individual 8x8 tiles
-        // TODO: Handle sprite rendering
-        let mut pattern_table = bus.ppu_get_pattern_table(true);
-        let tile = pattern_table.nth(pt_idx as usize).unwrap();
-
-        // Draw the tile to the framebuffer
-        for y in tile_px_y..tile_px_y + 8 {
-            for x in tile_px_x..tile_px_x + 8 {
-                // Read the palette idx data from both bitplanes in the tile
-                let bit_idx = 7 - (x % 8); // Flip the bit index so we go from left to right over the bits
-                let y_tile_idx = y % 8;
-                let low_bit = u8::from(tile[y_tile_idx].bit(bit_idx));
-                let high_bit = u8::from(tile[y_tile_idx + 8].bit(bit_idx));
-                let palette_idx = low_bit + (high_bit << 1);
-
-                let color = bus
-                    .palette_memory
-                    .get_color_by_idx(palette_num, palette_idx)
-                    .unwrap();
-                fb.plot_pixel(x - fine_offset_x, y - fine_offset_y, color);
-            }
         }
     }
 

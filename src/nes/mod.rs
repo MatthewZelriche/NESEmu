@@ -108,7 +108,7 @@ impl eframe::App for NES {
                         for _ in 0..(3 * cycles) {
                             // Detect when the GPU finished all of its scanlines and
                             // looped back over to scanline 0
-                            let res = self.ppu.step(&mut self.bus);
+                            let res = self.ppu.step(&mut self.screen, &mut self.bus);
                             if !did_finish_frame && res {
                                 did_finish_frame = res;
                             }
@@ -127,9 +127,7 @@ impl eframe::App for NES {
         }
 
         if did_finish_frame {
-            // Render the frame to the screen
-            self.ppu
-                .draw_to_framebuffer(&mut self.screen, &mut self.bus);
+            // Present the frame to the screen
             self.screen.update_texture();
         }
 
