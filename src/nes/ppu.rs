@@ -218,7 +218,7 @@ impl PPU {
                 .iter_mut()
                 .filter(|sprite| sprite.current_x == pixel_space_x as u8);
             for sprite in sprite_iter {
-                if sprite.current_x >= (sprite.x_pixel_coord + 8) {
+                if sprite.current_x >= sprite.x_pixel_coord.checked_add(8).unwrap_or(255) {
                     continue; // No more drawing needed for this scanline
                 }
                 // Render a single pixel of a sprite
