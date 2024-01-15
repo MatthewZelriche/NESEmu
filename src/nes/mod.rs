@@ -35,6 +35,7 @@ pub struct NES {
     screen: Screen,
     pending_interrupt: bool,
     frame_start: Instant,
+    dma_read_cycle: bool,
 }
 
 impl NES {
@@ -51,6 +52,7 @@ impl NES {
             screen: Screen::new(cc.egui_ctx.clone()),
             pending_interrupt: false,
             frame_start: Instant::now(),
+            dma_read_cycle: true,
         })
     }
 
@@ -102,27 +104,35 @@ impl eframe::App for NES {
             // we can just fake roughly how many cycles should be executed per frame
             loop {
                 self.pending_interrupt = self.ppu.generated_interrupt();
-                match self.cpu.step(&mut self.bus, &mut self.pending_interrupt) {
-                    Ok(cycles) => {
-                        // 3 cycles per CPU cycle
-                        for _ in 0..(3 * cycles) {
-                            // Detect when the GPU finished all of its scanlines and
-                            // looped back over to scanline 0
-                            let res = self.ppu.step(&mut self.screen, &mut self.bus);
-                            if !did_finish_frame && res {
-                                did_finish_frame = res;
-                            }
-                        }
-                        if did_finish_frame {
+
+                let cycles: u16 = if self.dma_read_cycle && self.bus.pending_dma() {
+                    self.bus.process_dma();
+                    513 // Number of cycles it takes for a DMA transfer
+                } else {
+                    match self.cpu.step(&mut self.bus, &mut self.pending_interrupt) {
+                        Ok(cycles) => cycles as u16,
+                        Err(error) => {
+                            self.halt = true;
+                            log::error!("Emulation failed with error: {}", error);
                             break;
                         }
                     }
-                    Err(error) => {
-                        self.halt = true;
-                        log::error!("Emulation failed with error: {}", error);
-                        break;
+                };
+
+                // 3 cycles per CPU cycle
+                for _ in 0..(3 * cycles) {
+                    // Detect when the GPU finished all of its scanlines and
+                    // looped back over to scanline 0
+                    let res = self.ppu.step(&mut self.screen, &mut self.bus);
+                    if !did_finish_frame && res {
+                        did_finish_frame = res;
                     }
                 }
+                if did_finish_frame {
+                    break;
+                }
+
+                self.dma_read_cycle = !self.dma_read_cycle;
             }
         }
 

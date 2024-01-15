@@ -15,6 +15,10 @@ pub struct Bus {
     cartridge: Cartridge,
     cpu_ram: [u8; 2048],
     ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
+    pub oam_ram: [u8; 256],
+    oam_addr: u8,
+    pending_dma: bool,
+    dma_page_addr: usize,
     ppu_registers: PPURegisters,
     pub palette_memory: PaletteMemory,
     pub controller: Controller,
@@ -27,6 +31,10 @@ impl Bus {
             cpu_ram: [0u8; 2048], // Real RAM starts in an uninit state, but rust
             // makes us init it
             ppu_ram: [0u8; 2048],
+            oam_ram: [0u8; 256],
+            oam_addr: 0,
+            pending_dma: false,
+            dma_page_addr: 0,
             ppu_registers: PPURegisters::default(),
             palette_memory: PaletteMemory::new(),
             controller: Controller::new(),
@@ -35,6 +43,19 @@ impl Bus {
 }
 
 impl Bus {
+    pub fn pending_dma(&self) -> bool {
+        self.pending_dma
+    }
+
+    pub fn process_dma(&mut self) {
+        for addr in self.dma_page_addr..self.dma_page_addr + 0x100 {
+            self.cpu_write_ppu_register(0x2004, self.cpu_ram[addr])
+                .unwrap();
+        }
+
+        self.pending_dma = false;
+    }
+
     pub fn cartridge_header(&self) -> &INESHeader {
         &self.cartridge.get_header()
     }
@@ -81,7 +102,12 @@ impl Bus {
     pub fn cpu_write_byte(&mut self, address: usize, value: u8) -> Result<(), &'static str> {
         match address {
             (0..=2048) => Ok(self.cpu_ram[address] = value),
-            (0x4000..=0x4015) => Ok(()), // TODO: APU
+            (0x4000..=0x4013) => Ok(()), // TODO: APU
+            0x4014 => {
+                self.dma_page_addr = (value as usize) << 8;
+                Ok(self.pending_dma = true)
+            }
+            0x4015 => Ok(()), // TODO: APU?
             0x4016 => Ok(self.controller.write_to_controller(value.bit(0))),
             0x4017 => Ok(()), // Currently not supported
             (0x2000..=0x3FFF) => self.cpu_write_ppu_register(address, value),
@@ -108,8 +134,8 @@ impl Bus {
                 }
                 Ok(val)
             }
-            0x2003 => Ok(0x0), // TODO
-            0x2004 => Ok(0x0), // TODO
+            0x2003 => Ok(self.oam_addr),
+            0x2004 => Ok(self.oam_ram[self.oam_addr as usize]),
             0x2005 => Ok(0x0), // TODO
             0x2006 => todo!(), // How to handle this? It's two bytes
             0x2007 => {
@@ -155,8 +181,11 @@ impl Bus {
             0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
             0x2001 => Ok(self.ppu_registers.ppustatus.set(value)),
             0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
-            0x2003 => Ok(()), // TODO
-            0x2004 => Ok(()), // TODO
+            0x2003 => Ok(self.oam_addr = value), // TODO: Needs to be set to 0 during vblank (?)
+            0x2004 => {
+                self.oam_ram[self.oam_addr as usize] = value;
+                Ok(self.oam_addr = self.oam_addr.wrapping_add(1))
+            }
             0x2005 => {
                 if !self.ppu_registers.write_latch {
                     self.ppu_registers.fine_x = value;
