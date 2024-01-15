@@ -12,7 +12,6 @@ use super::{
 };
 
 // TODO:
-// Sprite Horz & Vertical Flipping
 // Sprite Background Priority
 // Sprite 0 hit
 // Max 8 Sprites per line (+ sprite overflow)
@@ -179,7 +178,7 @@ impl PPU {
                 .nth(pt_idx as usize)
                 .unwrap();
 
-            let palette_idx_bg = PPU::compute_palette_idx(
+            let palette_idx_bg = PPU::compute_bg_palette_idx(
                 tile,
                 fine_x_wrapped,
                 fine_y_wrapped + pixel_space_y as u8,
@@ -209,6 +208,8 @@ impl PPU {
                     sprite_data,
                     pixel_space_x as u8 - sprite.x_pixel_coord,
                     pixel_space_y as u8 - sprite.y_pixel_coord,
+                    sprite.attribs.is_set(SpriteAttribs::FLIP_HORZ),
+                    sprite.attribs.is_set(SpriteAttribs::FLIP_VERT),
                 );
                 if sprite_palette_idx != 0 {
                     // Not transparent, write it in
@@ -255,13 +256,32 @@ impl PPU {
         }
     }
 
-    pub fn compute_palette_idx(tile_data: &[u8], x_coord: u8, y_coord: u8) -> u8 {
+    pub fn compute_palette_idx(
+        tile_data: &[u8],
+        x_coord: u8,
+        y_coord: u8,
+        flip_x: bool,
+        flip_y: bool,
+    ) -> u8 {
         // Read the palette idx data from both bitplanes in the tile
-        let bit_idx = 7 - (x_coord); // Flip the bit index so we go from left to right over the bits
-        let y_tile_idx = (y_coord) % 8;
+        let bit_idx = if flip_x {
+            x_coord
+        } else {
+            7 - (x_coord) // Flip the bit index so we go from left to right over the bits
+                          // The pattern table technically stores the sprites flipped horizontally by default
+        };
+        let y_tile_idx = if flip_y {
+            7 - (y_coord % 8)
+        } else {
+            y_coord % 8
+        };
         let low_bit = u8::from(tile_data[y_tile_idx as usize].bit(bit_idx as usize));
         let high_bit = u8::from(tile_data[(y_tile_idx + 8) as usize].bit(bit_idx as usize));
         low_bit + (high_bit << 1)
+    }
+
+    pub fn compute_bg_palette_idx(tile_data: &[u8], x_coord: u8, y_coord: u8) -> u8 {
+        PPU::compute_palette_idx(tile_data, x_coord, y_coord, false, false)
     }
 
     pub fn compute_bg_palette_num(attrib_value: u8, coarse_x: u8, coarse_y: u8) -> u8 {
