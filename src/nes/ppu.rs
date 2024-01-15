@@ -12,7 +12,6 @@ use super::{
 };
 
 // TODO:
-// Sprite Background Priority
 // Sprite 0 hit
 // Max 8 Sprites per line (+ sprite overflow)
 // 8x16 bit sprite mode
@@ -170,7 +169,7 @@ impl PPU {
             let pt_idx = bus
                 .ppu_read_nametable(self.nametable_addr as usize)
                 .unwrap();
-            let palette_num = PPU::compute_bg_palette_num(attrib_table_val, coarse_x, coarse_y);
+            let palette_num_bg = PPU::compute_bg_palette_num(attrib_table_val, coarse_x, coarse_y);
 
             // Get the chr tile data, a 16 byte chunk representing an individual 8x8 tile
             let tile = bus
@@ -185,7 +184,7 @@ impl PPU {
             );
             let bg_color = bus
                 .palette_memory
-                .get_color_by_idx(palette_num, palette_idx_bg)
+                .get_color_by_idx(palette_num_bg, palette_idx_bg)
                 .unwrap();
             fb.plot_pixel(pixel_space_x, pixel_space_y, bg_color);
 
@@ -211,14 +210,28 @@ impl PPU {
                     sprite.attribs.is_set(SpriteAttribs::FLIP_HORZ),
                     sprite.attribs.is_set(SpriteAttribs::FLIP_VERT),
                 );
+                // if the sprite pixel isn't transparent...
                 if sprite_palette_idx != 0 {
-                    // Not transparent, write it in
                     let sprite_palette_num: u8 = sprite.attribs.read(SpriteAttribs::PALETTE) + 4;
                     let sprite_color = bus
                         .palette_memory
                         .get_color_by_idx(sprite_palette_num, sprite_palette_idx)
                         .unwrap();
-                    fb.plot_pixel(pixel_space_x, pixel_space_y, sprite_color);
+
+                    // Is the sprite pixel behind a transparent background pixel?
+                    if sprite.attribs.is_set(SpriteAttribs::PRIORITY)
+                        && !bus
+                            .palette_memory
+                            .is_entry_transparent(palette_num_bg, palette_idx_bg)
+                    {
+                        // If this sprite pixel is meant to be drawn in the background,
+                        // we must re-write the background pixel color into here
+                        // We have to REWRITE the background color because the pixel color may have
+                        // been adjusted by a previous sprite overlapping this sprite
+                        fb.plot_pixel(pixel_space_x, pixel_space_y, bg_color);
+                    } else {
+                        fb.plot_pixel(pixel_space_x, pixel_space_y, sprite_color);
+                    }
                 }
                 sprite.current_x += 1;
             }

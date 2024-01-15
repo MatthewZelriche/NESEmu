@@ -41,6 +41,11 @@ impl PaletteMemory {
         }
     }
 
+    pub fn is_entry_transparent(&self, palette_num: u8, idx: u8) -> bool {
+        let palette_idx = (palette_num * 4) + idx;
+        palette_idx % 4 == 0
+    }
+
     pub fn get_color_by_idx(&self, palette_num: u8, idx: u8) -> Result<Color32, &'static str> {
         let color_idx = self.memory[(palette_num as usize * 4) + idx as usize];
         lookup_palette_color(color_idx)
