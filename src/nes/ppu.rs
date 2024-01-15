@@ -12,7 +12,6 @@ use super::{
 };
 
 // TODO:
-// horizontal scrolling is broken
 // Max 8 Sprites per line (+ sprite overflow)
 // 8x16 bit sprite mode
 
@@ -81,6 +80,9 @@ impl PPU {
             self.x_scroll = bus.ppu_get_registers().fine_x;
             // We only have to modify the coarse x scroll in the nametable addr
             self.nametable_addr.set_bit_range(4, 0, self.x_scroll / 8);
+            // According to loopy docs, we reset bit 10 of the nametable address on every scanline
+            self.nametable_addr
+                .set_bit(10, bus.ppu_get_registers().ppuctrl.get().bit(0));
         }
 
         // Each step processes a single dot/pixel
@@ -153,6 +155,14 @@ impl PPU {
         let nametable_start_idx =
             ((((self.y_scroll as usize) / 8) * 32) + (self.x_scroll as usize / 8)) as usize;
         self.nametable_addr = (bus.ppu_get_nametable_base_addr() + nametable_start_idx) as u16;
+
+        // According to https://emudev.de/nes-emulator/fixing-smb/
+        // we are supposed to clear the PPUCTRL nametable address every frame.
+        // This conflicts with the loopy docs and I feel like it can't be truly correct,
+        // btu it does solve the SMB bugs I've been having
+        bus.ppu_get_registers_mut()
+            .ppuctrl
+            .modify(PPUCTRL::NTABLE_ADDR::Addr2000);
     }
 
     // TODO: Handle sprite rendering
