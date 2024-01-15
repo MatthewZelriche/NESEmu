@@ -4,7 +4,7 @@ use std::{
     io::{Error, ErrorKind, Read, Seek, SeekFrom},
 };
 
-use tock_registers::interfaces::Readable;
+use tock_registers::interfaces::{Readable, Writeable};
 
 use super::{
     ines::{Flags1, Flags2, INESHeader},
@@ -39,8 +39,12 @@ impl Cartridge {
         let mut header = INESHeader::default();
         file.read_exact(slice::from_mut(&mut header.prg_rom_size))?;
         file.read_exact(slice::from_mut(&mut header.chr_rom_size))?;
-        file.read_exact(slice::from_mut(&mut header.flags1.get()))?;
-        file.read_exact(slice::from_mut(&mut header.flags2.get()))?;
+        let mut flags1 = 0;
+        file.read_exact(slice::from_mut(&mut flags1))?;
+        header.flags1.set(flags1);
+        let mut flags2 = 0;
+        file.read_exact(slice::from_mut(&mut flags2))?;
+        header.flags2.set(flags2);
         file.read_exact(slice::from_mut(&mut header.prg_ram_size))?;
         file.read_exact(slice::from_mut(&mut header.tv_system))?;
         // Don't support CHR RAM currently
