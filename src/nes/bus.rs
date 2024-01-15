@@ -179,7 +179,7 @@ impl Bus {
     ) -> Result<(), &'static str> {
         match address {
             0x2000 => Ok(self.ppu_registers.ppuctrl.set(value)),
-            0x2001 => Ok(self.ppu_registers.ppustatus.set(value)),
+            0x2001 => Ok(self.ppu_registers.ppumask.set(value)),
             0x2002 => Ok(self.ppu_registers.ppustatus.set(value)),
             0x2003 => Ok(self.oam_addr = value), // TODO: Needs to be set to 0 during vblank (?)
             0x2004 => {
