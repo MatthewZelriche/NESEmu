@@ -12,7 +12,7 @@ use super::{
 };
 
 // TODO:
-// Sprite 0 hit
+// horizontal scrolling is broken
 // Max 8 Sprites per line (+ sprite overflow)
 // 8x16 bit sprite mode
 
@@ -34,16 +34,18 @@ struct OAMSprite {
     attribs: InMemoryRegister<u8, SpriteAttribs::Register>,
     x_pixel_coord: u8,
     current_x: u8,
+    sprite_0: bool,
 }
 
 impl OAMSprite {
-    pub fn from(data: &[u8]) -> Self {
+    pub fn from(data: &[u8], sprite_0: bool) -> Self {
         Self {
             y_pixel_coord: data[0],
             tile_idx: data[1],
             attribs: InMemoryRegister::new(data[2]),
             x_pixel_coord: data[3],
             current_x: data[3],
+            sprite_0,
         }
     }
 }
@@ -110,6 +112,9 @@ impl PPU {
             bus.ppu_get_registers_mut()
                 .ppustatus
                 .modify(PPUSTATUS::VBLANK::CLEAR);
+            bus.ppu_get_registers_mut()
+                .ppustatus
+                .modify(PPUSTATUS::SPRITE0_HIT::CLEAR);
         }
         return false;
     }
@@ -118,11 +123,12 @@ impl PPU {
     fn sprite_evaluation(&mut self, next_scanline: usize, bus: &mut Bus) {
         self.secondary_oam.clear();
 
-        for sprite_data in bus.oam_ram.chunks(4) {
+        for (i, sprite_data) in bus.oam_ram.chunks(4).enumerate() {
             let y_coord = sprite_data[0] as usize;
             // TODO: IMPORTANT: Sprites are sometimes 16 pixels long!
             if (y_coord..y_coord + 8).contains(&next_scanline) {
-                self.secondary_oam.push(OAMSprite::from(sprite_data));
+                self.secondary_oam
+                    .push(OAMSprite::from(sprite_data, i == 0));
             }
         }
 
@@ -189,7 +195,9 @@ impl PPU {
             fb.plot_pixel(pixel_space_x, pixel_space_y, bg_color);
 
             // Handle sprites
-            // TODO: Proper background resolution
+            let bg_pixel_transparent = bus
+                .palette_memory
+                .is_entry_transparent(palette_num_bg, palette_idx_bg);
             let sprite_iter = self
                 .secondary_oam
                 .iter_mut()
@@ -218,12 +226,15 @@ impl PPU {
                         .get_color_by_idx(sprite_palette_num, sprite_palette_idx)
                         .unwrap();
 
+                    // Is this a sprite zero hit?
+                    if sprite.sprite_0 && !bg_pixel_transparent {
+                        bus.ppu_get_registers_mut()
+                            .ppustatus
+                            .modify(PPUSTATUS::SPRITE0_HIT::SET);
+                    }
+
                     // Is the sprite pixel behind a transparent background pixel?
-                    if sprite.attribs.is_set(SpriteAttribs::PRIORITY)
-                        && !bus
-                            .palette_memory
-                            .is_entry_transparent(palette_num_bg, palette_idx_bg)
-                    {
+                    if sprite.attribs.is_set(SpriteAttribs::PRIORITY) && !bg_pixel_transparent {
                         // If this sprite pixel is meant to be drawn in the background,
                         // we must re-write the background pixel color into here
                         // We have to REWRITE the background color because the pixel color may have
