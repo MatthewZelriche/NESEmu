@@ -1,5 +1,9 @@
 use bitfield::{Bit, BitMut, BitRange, BitRangeMut};
-use tock_registers::interfaces::{ReadWriteable, Readable};
+use tock_registers::{
+    interfaces::{ReadWriteable, Readable},
+    register_bitfields,
+    registers::InMemoryRegister,
+};
 
 use super::{
     bus::Bus,
@@ -7,11 +11,51 @@ use super::{
     screen::FrameBuffer,
 };
 
+// TODO:
+// Sprite Horz & Vertical Flipping
+// Sprite Background Priority
+// Sprite 0 hit
+// Max 8 Sprites per line (+ sprite overflow)
+// 8x16 bit sprite mode
+
+register_bitfields! [
+    u8,
+    SpriteAttribs [
+        PALETTE           OFFSET(0) NUMBITS(2) [],
+        UNIMPLEMENTED     OFFSET(2) NUMBITS(3) [],
+        PRIORITY          OFFSET(5) NUMBITS(1) [],
+        FLIP_HORZ         OFFSET(6) NUMBITS(1) [],
+        FLIP_VERT         OFFSET(7) NUMBITS(1) [],
+    ]
+];
+
+#[repr(C)]
+struct OAMSprite {
+    y_pixel_coord: u8,
+    tile_idx: u8,
+    attribs: InMemoryRegister<u8, SpriteAttribs::Register>,
+    x_pixel_coord: u8,
+    current_x: u8,
+}
+
+impl OAMSprite {
+    pub fn from(data: &[u8]) -> Self {
+        Self {
+            y_pixel_coord: data[0],
+            tile_idx: data[1],
+            attribs: InMemoryRegister::new(data[2]),
+            x_pixel_coord: data[3],
+            current_x: data[3],
+        }
+    }
+}
+
 pub struct PPU {
     nametable_addr: u16,
     x_scroll: u8,
     y_scroll: u8,
     pub scanlines: usize,
+    secondary_oam: Vec<OAMSprite>,
     pub dots: usize,
     generated_interrupt: bool,
 }
@@ -25,6 +69,7 @@ impl PPU {
             x_scroll: 0,
             y_scroll: 0,
             scanlines: 0,
+            secondary_oam: Vec::new(),
             dots: 21, // Simulates power-up delay
             generated_interrupt: false,
         }
@@ -40,6 +85,7 @@ impl PPU {
             // Don't bother drawing to the overdraw scanlines, they will never be seen anyway
             if self.scanlines <= 239 {
                 self.draw_scanline(fb, bus);
+                self.sprite_evaluation(self.scanlines + 1, bus);
             }
             self.scanlines += 1;
             self.dots = 0;
@@ -68,6 +114,22 @@ impl PPU {
                 .modify(PPUSTATUS::VBLANK::CLEAR);
         }
         return false;
+    }
+
+    // TODO: Max 8 Sprites
+    fn sprite_evaluation(&mut self, next_scanline: usize, bus: &mut Bus) {
+        self.secondary_oam.clear();
+
+        for sprite_data in bus.oam_ram.chunks(4) {
+            let y_coord = sprite_data[0] as usize;
+            // TODO: IMPORTANT: Sprites are sometimes 16 pixels long!
+            if (y_coord..y_coord + 8).contains(&next_scanline) {
+                self.secondary_oam.push(OAMSprite::from(sprite_data));
+            }
+        }
+
+        // Reverse the order, because we want to draw the earliest sprite last
+        self.secondary_oam.reverse();
     }
 
     fn prepare_next_frame(&mut self, bus: &mut Bus) {
@@ -109,25 +171,56 @@ impl PPU {
             let pt_idx = bus
                 .ppu_read_nametable(self.nametable_addr as usize)
                 .unwrap();
-            let palette_num = self.compute_palette_index(attrib_table_val, coarse_x, coarse_y);
+            let palette_num = PPU::compute_bg_palette_num(attrib_table_val, coarse_x, coarse_y);
 
             // Get the chr tile data, a 16 byte chunk representing an individual 8x8 tile
-            let mut pattern_table = bus.ppu_get_pattern_table(true);
-            let tile = pattern_table.nth(pt_idx as usize).unwrap();
-            // Compute palette color
-            // Read the palette idx data from both bitplanes in the tile
-            let bit_idx = 7 - (fine_x_wrapped); // Flip the bit index so we go from left to right over the bits
-            let y_tile_idx = (fine_y_wrapped as usize + pixel_space_y) % 8;
-            let low_bit = u8::from(tile[y_tile_idx as usize].bit(bit_idx as usize));
-            let high_bit = u8::from(tile[(y_tile_idx + 8) as usize].bit(bit_idx as usize));
-            let palette_idx = low_bit + (high_bit << 1);
-            let color = bus
-                .palette_memory
-                .get_color_by_idx(palette_num, palette_idx)
+            let tile = bus
+                .ppu_get_pattern_table(true)
+                .nth(pt_idx as usize)
                 .unwrap();
 
-            // Write pixel color into the fb
-            fb.plot_pixel(pixel_space_x, pixel_space_y, color);
+            let palette_idx_bg = PPU::compute_palette_idx(
+                tile,
+                fine_x_wrapped,
+                fine_y_wrapped + pixel_space_y as u8,
+            );
+            let bg_color = bus
+                .palette_memory
+                .get_color_by_idx(palette_num, palette_idx_bg)
+                .unwrap();
+            fb.plot_pixel(pixel_space_x, pixel_space_y, bg_color);
+
+            // Handle sprites
+            // TODO: Proper background resolution
+            let sprite_iter = self
+                .secondary_oam
+                .iter_mut()
+                .filter(|sprite| sprite.current_x == pixel_space_x as u8);
+            for sprite in sprite_iter {
+                if sprite.current_x >= (sprite.x_pixel_coord + 8) {
+                    continue; // No more drawing needed for this scanline
+                }
+                // Render a single pixel of a sprite
+                let sprite_data = bus
+                    .ppu_get_pattern_table(false)
+                    .nth(sprite.tile_idx as usize)
+                    .unwrap();
+                let sprite_palette_idx = PPU::compute_palette_idx(
+                    sprite_data,
+                    pixel_space_x as u8 - sprite.x_pixel_coord,
+                    pixel_space_y as u8 - sprite.y_pixel_coord,
+                );
+                if sprite_palette_idx != 0 {
+                    // Not transparent, write it in
+                    let sprite_palette_num: u8 = sprite.attribs.read(SpriteAttribs::PALETTE) + 4;
+                    let sprite_color = bus
+                        .palette_memory
+                        .get_color_by_idx(sprite_palette_num, sprite_palette_idx)
+                        .unwrap();
+                    fb.plot_pixel(pixel_space_x, pixel_space_y, sprite_color);
+                }
+                sprite.current_x += 1;
+            }
 
             // Handle offset x wrapping into the nametable entry
             fine_x_wrapped += 1;
@@ -162,7 +255,16 @@ impl PPU {
         }
     }
 
-    pub fn compute_palette_index(&self, attrib_value: u8, coarse_x: u8, coarse_y: u8) -> u8 {
+    pub fn compute_palette_idx(tile_data: &[u8], x_coord: u8, y_coord: u8) -> u8 {
+        // Read the palette idx data from both bitplanes in the tile
+        let bit_idx = 7 - (x_coord); // Flip the bit index so we go from left to right over the bits
+        let y_tile_idx = (y_coord) % 8;
+        let low_bit = u8::from(tile_data[y_tile_idx as usize].bit(bit_idx as usize));
+        let high_bit = u8::from(tile_data[(y_tile_idx + 8) as usize].bit(bit_idx as usize));
+        low_bit + (high_bit << 1)
+    }
+
+    pub fn compute_bg_palette_num(attrib_value: u8, coarse_x: u8, coarse_y: u8) -> u8 {
         // The second bit of our tile coordinates contains the information
         // we need to determine our quadrant
         match (coarse_y.bit(1), coarse_x.bit(1)) {
