@@ -26,17 +26,14 @@ impl PaletteMemory {
         }
     }
 
-    pub fn get_entry(&self, addr: usize) -> u8 {
+    pub fn get_entry(&self, mut addr: usize) -> u8 {
+        // Mirror transparent colors into the universal background color
+        if addr % 4 == 0 {
+            addr = 0x3F00;
+        }
+
         match addr {
-            0x3F00..=0x3F0F => self.memory[addr % 0x3F00],
-            0x3F10 => self.memory[0], // Mirror of background
-            0x3F11..=0x3F13 => self.memory[addr % 0x3F00],
-            0x3F14 => self.memory[4], // Mirror of bkgrnd palette 0 transparent
-            0x3F15..=0x3F17 => self.memory[addr % 0x3F00],
-            0x3F18 => self.memory[8], // Mirror of bkgrnd palette 1 transparent
-            0x3F19..=0x3F1B => self.memory[addr % 0x3F00],
-            0x3F1C => self.memory[0xC], // Mirror of bkgrnd palette 2 transparent
-            0x3F1D..=0x3F1F => self.memory[addr % 0x3F00],
+            0x3F00..=0x3F1F => self.memory[addr % 0x3F00],
             _ => panic!("Invalid palette memory address!"),
         }
     }
@@ -47,7 +44,8 @@ impl PaletteMemory {
     }
 
     pub fn get_color_by_idx(&self, palette_num: u8, idx: u8) -> Result<Color32, &'static str> {
-        let color_idx = self.memory[(palette_num as usize * 4) + idx as usize];
+        let addr = 0x3F00 + (palette_num as usize * 4) + idx as usize;
+        let color_idx = self.get_entry(addr);
         lookup_palette_color(color_idx)
     }
 }

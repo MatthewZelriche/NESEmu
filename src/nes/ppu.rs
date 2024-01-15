@@ -14,6 +14,7 @@ use super::{
 // TODO:
 // Max 8 Sprites per line (+ sprite overflow)
 // 8x16 bit sprite mode
+// Respect PPUMASK disabling sprites or bg
 
 register_bitfields! [
     u8,
