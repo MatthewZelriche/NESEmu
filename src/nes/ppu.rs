@@ -76,6 +76,13 @@ impl PPU {
     }
 
     pub fn step<T: FrameBuffer>(&mut self, fb: &mut T, bus: &mut Bus) -> bool {
+        // At the start of each scanline, we have to check if a split x scroll occured...
+        if self.dots == 0 {
+            self.x_scroll = bus.ppu_get_registers().fine_x;
+            // We only have to modify the coarse x scroll in the nametable addr
+            self.nametable_addr.set_bit_range(4, 0, self.x_scroll / 8);
+        }
+
         // Each step processes a single dot/pixel
         // Though in reality we don't render under the scanline is finished
         self.dots += 1;
@@ -139,8 +146,6 @@ impl PPU {
     fn prepare_next_frame(&mut self, bus: &mut Bus) {
         self.scanlines = 0;
         // Update x_scroll and y_scroll
-        // My understanding is that programs are meant to change these only during vblank,
-        // so it should be safe to check them only once per frame
         self.y_scroll = bus.ppu_get_registers().fine_y;
         self.x_scroll = bus.ppu_get_registers().fine_x;
 
