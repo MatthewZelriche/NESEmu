@@ -223,6 +223,10 @@ impl Bus {
                         self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)] =
                             value;
                     }
+                    (0x3000..=0x3EFF) => {
+                        let addr_mirrored = self.ppu_registers.ppuaddr - 0x1000;
+                        self.ppu_ram[self.translate_nametable_addr(addr_mirrored)] = value;
+                    }
                     (0x3F00..=0x3FFF) => {
                         self.palette_memory.set_entry(
                             0x3F00 | (self.ppu_registers.ppuaddr as usize % 0x20),
@@ -242,10 +246,9 @@ impl Bus {
 
     fn ppu_increment_vram_ptr(&mut self) {
         if self.ppu_registers.ppuctrl.is_set(PPUCTRL::VRAM_INC) {
-            // TODO: Does this need a wrapping add?
-            self.ppu_registers.ppuaddr += 32;
+            self.ppu_registers.ppuaddr = (self.ppu_registers.ppuaddr + 32) % 0x4000;
         } else {
-            self.ppu_registers.ppuaddr += 1;
+            self.ppu_registers.ppuaddr = (self.ppu_registers.ppuaddr + 1) % 0x4000;
         }
     }
 
