@@ -210,8 +210,15 @@ impl Bus {
             }
             0x2007 => {
                 match self.ppu_registers.ppuaddr {
-                    // TODO: Thigns like CHRRAM and other scenarios where the CPU
-                    // can write to something thats not a nametable
+                    (0x0000..=0x1FFF) => {
+                        // Attempt to write to CHR RAM...
+                        if let Some(ram) = self.cartridge.get_chr_ram() {
+                            ram[self.ppu_registers.ppuaddr as usize] = value;
+                        } else {
+                            // If there is no CHR RAM we treat it as a no op...
+                            return Ok(());
+                        }
+                    }
                     (0x2000..=0x2FFF) => {
                         self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)] =
                             value;

@@ -11,11 +11,16 @@ use super::{
     mappers::{get_mapper, Mapper},
 };
 
+enum CHR {
+    ROM(Vec<u8>),
+    RAM(Vec<u8>),
+}
+
 pub struct Cartridge {
     header: INESHeader,
     trainer: Option<[u8; 512]>,
     prg_rom: Vec<u8>,
-    chr_rom: Vec<u8>,
+    chr_data: CHR,
     pub mapper: Box<dyn Mapper>,
 }
 
@@ -47,10 +52,6 @@ impl Cartridge {
         header.flags2.set(flags2);
         file.read_exact(slice::from_mut(&mut header.prg_ram_size))?;
         file.read_exact(slice::from_mut(&mut header.tv_system))?;
-        // Don't support CHR RAM currently
-        if header.chr_rom_size == 0 {
-            return Err(Error::from(ErrorKind::Unsupported));
-        }
         // Skip the rest of the header
         file.seek(SeekFrom::Start(Cartridge::HEADER_SIZE.into()))?;
         // read trainer, if it exists
@@ -67,13 +68,21 @@ impl Cartridge {
             0u8,
         );
         file.read_exact(&mut prg_rom)?;
-        // Read CHR ROM
-        let mut chr_rom = Vec::new();
-        chr_rom.resize(
-            header.chr_rom_size as usize * Cartridge::CHR_ROM_BLOCK_SZ,
-            0u8,
-        );
-        file.read_exact(&mut chr_rom)?;
+
+        let chr_data = if header.chr_rom_size != 0 {
+            let mut chr_rom = Vec::new();
+            // Read CHR ROM
+            chr_rom.resize(
+                header.chr_rom_size as usize * Cartridge::CHR_ROM_BLOCK_SZ,
+                0u8,
+            );
+            file.read_exact(&mut chr_rom)?;
+            CHR::ROM(chr_rom)
+        } else {
+            let mut chr_ram = Vec::new();
+            chr_ram.resize(Cartridge::CHR_ROM_BLOCK_SZ, 0);
+            CHR::RAM(chr_ram)
+        };
 
         let prg_rom_size = header.prg_rom_size;
         let mapper_id = header.flags1.read(Flags1::MAPPER_LOWER)
@@ -82,7 +91,7 @@ impl Cartridge {
             header,
             trainer,
             prg_rom,
-            chr_rom,
+            chr_data,
             mapper: get_mapper(mapper_id, prg_rom_size)
                 .map_err(|_| Error::from(ErrorKind::Unsupported))?,
         })
@@ -92,8 +101,17 @@ impl Cartridge {
         &self.prg_rom
     }
 
+    pub fn get_chr_ram(&mut self) -> Option<&mut [u8]> {
+        match &mut self.chr_data {
+            CHR::ROM(_) => None,
+            CHR::RAM(data) => Some(data),
+        }
+    }
+
     pub fn get_chr_rom(&self) -> &[u8] {
-        &self.chr_rom
+        match &self.chr_data {
+            CHR::ROM(data) | CHR::RAM(data) => data,
+        }
     }
 
     pub fn get_header(&self) -> &INESHeader {
