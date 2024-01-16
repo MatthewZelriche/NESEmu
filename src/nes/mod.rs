@@ -5,7 +5,7 @@ use std::{
 
 use bitfield::BitMut;
 use eframe::{
-    egui::{Image, Key, Window},
+    egui::{Image, Key, Vec2, Window},
     CreationContext,
 };
 
@@ -142,7 +142,9 @@ impl eframe::App for NES {
         }
 
         self.ui.render(ctx, &mut self.bus);
-        Window::new("Game").show(ctx, |ui| ui.add(Image::new(&self.screen.texture)));
+        Window::new("Game").show(ctx, |ui| {
+            ui.add(Image::new(&self.screen.texture).fit_to_exact_size(Vec2::new(512.0, 480.0)))
+        });
 
         ctx.request_repaint();
 
