@@ -1251,10 +1251,13 @@ impl CPU {
         &'a mut self,
         opcode_val: u8,
         bus: &'a mut Bus,
+        log_opcode: bool,
     ) -> Result<u8, &'static str> {
         let opcode = self.lookup_opcode(opcode_val, bus)?;
-        // We don't care if this succeeds or not, since the logging info is optional
-        //let _ = self.write_opcode(&opcode, bus);
+        if log_opcode {
+            // We don't care if this succeeds or not, since the logging info is optional
+            let _ = self.write_opcode(&opcode, bus);
+        }
 
         let addr = self.fetch_operand_address(&opcode, bus)?;
         (opcode.execute)(self, addr, &opcode, bus)

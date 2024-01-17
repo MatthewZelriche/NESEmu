@@ -100,7 +100,7 @@ impl CPU {
         self.current_instruction_addr = self.registers.program_counter;
         let opcode = bus.cpu_read_byte(self.current_instruction_addr)?;
         self.registers.program_counter += 1;
-        let cycle_count = self.execute_opcode(opcode, bus)?;
+        let cycle_count = self.execute_opcode(opcode, bus, false)?;
         self.total_cycles += cycle_count as usize;
         self.cycles_remaining = cycle_count - 1;
         Ok(cycle_count)

@@ -18,7 +18,7 @@ enum CHR {
 
 pub struct Cartridge {
     header: INESHeader,
-    trainer: Option<[u8; 512]>,
+    _trainer: Option<[u8; 512]>,
     prg_rom: Vec<u8>,
     chr_data: CHR,
     pub mapper: Box<dyn Mapper>,
@@ -55,11 +55,11 @@ impl Cartridge {
         // Skip the rest of the header
         file.seek(SeekFrom::Start(Cartridge::HEADER_SIZE.into()))?;
         // read trainer, if it exists
-        let mut trainer = None;
+        let mut _trainer = None;
         if header.flags1.is_set(Flags1::HAS_TRAINER) {
             let mut trainer_data = [0u8; 512];
             file.read_exact(&mut trainer_data)?;
-            trainer = Some(trainer_data);
+            _trainer = Some(trainer_data);
         }
         // Read PRG ROM
         let mut prg_rom = Vec::new();
@@ -89,7 +89,7 @@ impl Cartridge {
             + (header.flags2.read(Flags2::MAPPER_UPPER) << 4);
         Ok(Self {
             header,
-            trainer,
+            _trainer,
             prg_rom,
             chr_data,
             mapper: get_mapper(mapper_id, prg_rom_size)
