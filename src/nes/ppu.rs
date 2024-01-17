@@ -194,10 +194,7 @@ impl PPU {
             let palette_num_bg = PPU::compute_bg_palette_num(attrib_table_val, coarse_x, coarse_y);
 
             // Get the chr tile data, a 16 byte chunk representing an individual 8x8 tile
-            let tile = bus
-                .ppu_get_pattern_table(true)
-                .nth(pt_idx as usize)
-                .unwrap();
+            let tile = bus.ppu_get_pattern_entry(pt_idx, true);
 
             let palette_idx_bg = PPU::compute_bg_palette_idx(
                 tile,
@@ -223,10 +220,7 @@ impl PPU {
                     continue; // No more drawing needed for this scanline
                 }
                 // Render a single pixel of a sprite
-                let sprite_data = bus
-                    .ppu_get_pattern_table(false)
-                    .nth(sprite.tile_idx as usize)
-                    .unwrap();
+                let sprite_data = bus.ppu_get_pattern_entry(sprite.tile_idx, false);
                 let sprite_palette_idx = PPU::compute_palette_idx(
                     sprite_data,
                     pixel_space_x as u8 - sprite.x_pixel_coord,

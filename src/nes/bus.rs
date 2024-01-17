@@ -1,18 +1,17 @@
-use std::{io::Error, slice::Chunks};
+use std::io::Error;
 
 use bitfield::{Bit, BitRangeMut};
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 use super::{
-    cartridge::Cartridge,
     controller::Controller,
-    ines::{Flags1, INESHeader},
+    mappers::{new_mapper, Mapper, MirrorMode},
     palette_memory::PaletteMemory,
     ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
 };
 
 pub struct Bus {
-    cartridge: Cartridge,
+    mapper: Box<dyn Mapper>,
     cpu_ram: [u8; 2048],
     ppu_ram: [u8; 2048], // TODO: Certain mappers can reroute this memory
     pub oam_ram: [u8; 256],
@@ -27,7 +26,7 @@ pub struct Bus {
 impl Bus {
     pub fn new(rom_path: &str) -> Result<Self, Error> {
         Ok(Self {
-            cartridge: Cartridge::new(rom_path)?,
+            mapper: new_mapper(rom_path)?,
             cpu_ram: [0u8; 2048], // Real RAM starts in an uninit state, but rust
             // makes us init it
             ppu_ram: [0u8; 2048],
@@ -56,10 +55,6 @@ impl Bus {
         self.pending_dma = false;
     }
 
-    pub fn cartridge_header(&self) -> &INESHeader {
-        &self.cartridge.get_header()
-    }
-
     pub fn cpu_read_byte(&mut self, address: usize) -> Result<u8, &'static str> {
         match address {
             (0..=0x1FFF) => Ok(self.cpu_ram[address % 0x0800]),
@@ -67,10 +62,7 @@ impl Bus {
             (0x4000..=0x4015) => Ok(0x0), // TODO: APU
             0x4016 => Ok(self.controller.read_from_controller()),
             0x4017 => Ok(0x0), // Currently not supported
-            (0x4020..=0xFFFF) => {
-                let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
-                Ok(self.cartridge.get_prg_rom()[prg_addr])
-            }
+            (0x4020..=0xFFFF) => self.mapper.prg_read(address),
             _ => Err("Bad address read on Bus"),
         }
     }
@@ -83,10 +75,7 @@ impl Bus {
             (0x2000..=0x3FFF) => self.cpu_read_ppu_register(address, false),
             (0x4000..=0x4017) => Ok(0x0), // TODO: APU
             // TODO: Controller
-            (0x4020..=0xFFFF) => {
-                let prg_addr = self.cartridge.mapper.map_prg_address(address)?;
-                Ok(self.cartridge.get_prg_rom()[prg_addr])
-            }
+            (0x4020..=0xFFFF) => self.mapper.prg_read(address),
             _ => Err("Bad address read on Bus"),
         }
     }
@@ -111,7 +100,7 @@ impl Bus {
             0x4016 => Ok(self.controller.write_to_controller(value.bit(0))),
             0x4017 => Ok(()), // Currently not supported
             (0x2000..=0x3FFF) => self.cpu_write_ppu_register(address, value),
-            (0x4020..=0xFFFF) => self.cartridge.mapper.write_register(address, value),
+            (0x4020..=0xFFFF) => self.mapper.prg_write(address, value),
             _ => Err("Bad address write on Bus"),
         }
     }
@@ -145,7 +134,7 @@ impl Bus {
                         let res = self.ppu_registers.ppudata;
                         // Then fetch new data
                         self.ppu_registers.ppudata =
-                            self.cartridge.get_chr_rom()[self.ppu_registers.ppuaddr as usize];
+                            self.mapper.chr_read(self.ppu_registers.ppuaddr as usize)?;
                         Ok(res)
                     }
                     (0x2000..=0x2FFF) => {
@@ -211,13 +200,8 @@ impl Bus {
             0x2007 => {
                 match self.ppu_registers.ppuaddr {
                     (0x0000..=0x1FFF) => {
-                        // Attempt to write to CHR RAM...
-                        if let Some(ram) = self.cartridge.get_chr_ram() {
-                            ram[self.ppu_registers.ppuaddr as usize] = value;
-                        } else {
-                            // If there is no CHR RAM we treat it as a no op...
-                            return Ok(());
-                        }
+                        self.mapper
+                            .chr_write(self.ppu_registers.ppuaddr as usize, value)?;
                     }
                     (0x2000..=0x2FFF) => {
                         self.ppu_ram[self.translate_nametable_addr(self.ppu_registers.ppuaddr)] =
@@ -252,22 +236,27 @@ impl Bus {
         }
     }
 
-    pub fn ppu_get_pattern_table(&self, background: bool) -> Chunks<'_, u8> {
-        if background {
-            let base_addr = if self.ppu_registers.ppuctrl.is_set(PPUCTRL::BPTNTABLE_ADDR) {
-                0x1000
-            } else {
-                0x0000
-            };
-            self.cartridge.get_chr_rom()[base_addr..].chunks(16)
-        } else {
-            let base_addr = if self.ppu_registers.ppuctrl.is_set(PPUCTRL::SPTNTABLE_ADDR) {
-                0x1000
-            } else {
-                0x0000
-            };
-            self.cartridge.get_chr_rom()[base_addr..].chunks(16)
-        }
+    pub fn ppu_get_pattern_entry(&self, pattern_idx: u8, background: bool) -> &[u8] {
+        let base_addr = match background {
+            true => {
+                if self.ppu_registers.ppuctrl.is_set(PPUCTRL::BPTNTABLE_ADDR) {
+                    0x1000
+                } else {
+                    0x0000
+                }
+            }
+            false => {
+                if self.ppu_registers.ppuctrl.is_set(PPUCTRL::SPTNTABLE_ADDR) {
+                    0x1000
+                } else {
+                    0x0000
+                }
+            }
+        };
+
+        self.mapper
+            .chr_read_pattern(base_addr, pattern_idx)
+            .expect("pattern_idx out of bounds")
     }
 
     pub fn ppu_get_registers_mut(&mut self) -> &mut PPURegisters {
@@ -282,21 +271,17 @@ impl Bus {
         if addr < 0x2000 || addr >= 0x3000 {
             return Err("Invalid address lookup into nametable");
         } else {
-            let nametable_mirror: Flags1::MIRRORING::Value = self
-                .cartridge_header()
-                .flags1
-                .read_as_enum(Flags1::MIRRORING)
-                .unwrap();
+            let nametable_mirror = self.mapper.current_mirroring_mode();
 
             return Ok(match nametable_mirror {
-                Flags1::MIRRORING::Value::VERT => match addr {
+                MirrorMode::VERT => match addr {
                     0x2000..=0x23FF => self.ppu_ram[addr - 0x2000],
                     0x2400..=0x27FF => self.ppu_ram[0x400 + addr - 0x2400],
                     0x2800..=0x2BFF => self.ppu_ram[addr - 0x2800],
                     0x2C00..=0x2FFF => self.ppu_ram[0x400 + addr - 0x2C00],
                     _ => panic!("Should never happen"),
                 },
-                Flags1::MIRRORING::Value::HORZ => match addr {
+                MirrorMode::HORZ => match addr {
                     0x2000..=0x23FF => self.ppu_ram[addr - 0x2000],
                     0x2400..=0x27FF => self.ppu_ram[addr - 0x2400],
                     0x2800..=0x2BFF => self.ppu_ram[0x400 + addr - 0x2800],
@@ -323,23 +308,19 @@ impl Bus {
 
     // TODO: This is a dumb hack
     pub fn translate_nametable_addr(&self, addr: u16) -> usize {
-        let nametable_mirror: Flags1::MIRRORING::Value = self
-            .cartridge_header()
-            .flags1
-            .read_as_enum(Flags1::MIRRORING)
-            .unwrap();
+        let nametable_mirror = self.mapper.current_mirroring_mode();
 
         let bytes = u16::to_le_bytes(addr);
 
         match nametable_mirror {
-            Flags1::MIRRORING::Value::VERT => match bytes[1] {
+            MirrorMode::VERT => match bytes[1] {
                 (0x20..=0x23) => (addr - 0x2000) as usize,
                 (0x24..=0x27) => (addr - 0x2400 + 0x400) as usize,
                 (0x28..=0x2B) => (addr - 0x2800) as usize,
                 (0x2C..=0x2F) => (addr - 0x2C00 + 0x400) as usize,
                 _ => panic!(),
             },
-            Flags1::MIRRORING::Value::HORZ => match bytes[1] {
+            MirrorMode::HORZ => match bytes[1] {
                 (0x20..=0x23) => (addr - 0x2000) as usize,
                 (0x24..=0x27) => (addr - 0x2400) as usize,
                 (0x28..=0x2B) => (addr - 0x2800 + 0x400) as usize,

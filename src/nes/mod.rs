@@ -12,10 +12,8 @@ use eframe::{
 use self::{bus::Bus, controller::InputEvent, cpu::CPU, ppu::PPU, screen::Screen, ui::UI};
 
 mod bus;
-mod cartridge;
 mod controller;
 mod cpu;
-mod ines;
 mod instruction;
 mod mappers;
 mod palette;
