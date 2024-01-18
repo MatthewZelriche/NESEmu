@@ -14,7 +14,6 @@ use self::{bus::Bus, controller::InputEvent, cpu::CPU, ppu::PPU, screen::Screen,
 mod bus;
 mod controller;
 mod cpu;
-mod instruction;
 mod mappers;
 mod palette;
 mod palette_memory;

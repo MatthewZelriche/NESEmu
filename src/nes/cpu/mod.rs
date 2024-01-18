@@ -9,6 +9,8 @@ use tock_registers::{
 
 use super::{bus::Bus, util::OptionalFile};
 
+mod opcodes;
+
 register_bitfields!(
     u8,
     pub Status [
@@ -24,12 +26,12 @@ register_bitfields!(
 );
 
 pub struct CPU {
-    pub registers: CPURegisters,
-    pub old_register_state: CPURegisters, // State for the CPU at the end of the PREVIOUS instruction
-    pub current_instruction_addr: usize, // Stores the instruction of the opcode currently executing
+    registers: CPURegisters,
+    old_register_state: CPURegisters, // State for the CPU at the end of the PREVIOUS instruction
+    current_instruction_addr: usize,  // Stores the instruction of the opcode currently executing
     cycles_remaining: u8,
-    pub total_cycles: usize,
-    pub log_file: OptionalFile,
+    total_cycles: usize,
+    log_file: OptionalFile,
 }
 
 impl CPU {
@@ -59,7 +61,7 @@ impl CPU {
             .modify(Status::INT_DISABLE::SET);
     }
 
-    pub fn push_stack(&mut self, data: &[u8], bus: &mut Bus) -> Result<(), &'static str> {
+    fn push_stack(&mut self, data: &[u8], bus: &mut Bus) -> Result<(), &'static str> {
         for byte in data {
             bus.cpu_write_byte(self.registers.stack_ptr + CPU::STACK_PG_START, *byte)?;
             self.registers.stack_ptr -= 1;
@@ -68,7 +70,7 @@ impl CPU {
         Ok(())
     }
 
-    pub fn pop_stack(&mut self, data: &mut [u8], bus: &mut Bus) -> Result<(), &'static str> {
+    fn pop_stack(&mut self, data: &mut [u8], bus: &mut Bus) -> Result<(), &'static str> {
         for byte in &mut *data {
             self.registers.stack_ptr += 1;
             *byte = bus.cpu_read_byte(self.registers.stack_ptr + CPU::STACK_PG_START)?;
@@ -77,7 +79,7 @@ impl CPU {
         Ok(())
     }
 
-    pub fn set_status_register(&mut self, mut val: u8) {
+    fn set_status_register(&mut self, mut val: u8) {
         val.set_bit(4, self.registers.status_register.is_set(Status::BFLAG)); // Ignore value of BFLAG in stack
         val.set_bit(5, true); // Unused bit must always be set
         self.registers.status_register.set(val);
@@ -127,11 +129,11 @@ impl CPU {
         Ok(8)
     }
 
-    pub fn will_cross_boundary(old_pc: usize, new_pc: usize) -> bool {
+    fn will_cross_boundary(old_pc: usize, new_pc: usize) -> bool {
         new_pc & CPU::PAGE_SZ_MASK != old_pc & CPU::PAGE_SZ_MASK
     }
 
-    pub fn set_flag_bit_if(&mut self, bit_pos: u8, predicate: bool) {
+    fn set_flag_bit_if(&mut self, bit_pos: u8, predicate: bool) {
         let mut new = self.registers.status_register.get();
         new.set_bit(bit_pos.into(), predicate);
         self.registers.status_register.set(new);

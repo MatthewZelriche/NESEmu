@@ -1,17 +1,14 @@
-use std::io::Write;
-
 use bitfield::{Bit, BitMut};
+use std::io::Write;
 use tock_registers::{
     fields::Field,
     interfaces::{ReadWriteable, Readable},
 };
 
 use super::{
-    bus::Bus,
-    cpu::{
-        Status::{self, Register},
-        CPU,
-    },
+    Bus,
+    Status::{self, Register},
+    CPU,
 };
 
 pub enum AddressMode {
@@ -1347,7 +1344,7 @@ impl CPU {
         }
     }
 
-    pub fn fetch_indirect_y_base_addr(
+    fn fetch_indirect_y_base_addr(
         &self,
         opcode: &Opcode,
         bus: &mut Bus,
@@ -1358,11 +1355,11 @@ impl CPU {
         Ok(u16::from_le_bytes(addr_bytes) as usize)
     }
 
-    pub fn fetch_absolute_base_addr(&self, opcode: &Opcode) -> usize {
+    fn fetch_absolute_base_addr(&self, opcode: &Opcode) -> usize {
         u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize
     }
 
-    pub fn adjust_cycles(
+    fn adjust_cycles(
         &mut self,
         addr: usize,
         opcode: &Opcode,
