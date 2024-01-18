@@ -1,3 +1,12 @@
+//! The PPU is responsible for drawing the final frame to the screen. It runs in parallel alongside
+//! the CPU, and the two components communicate via a set of PPU registers that are memory mapped into
+//! the CPU's address space. Synchronization of the two components is performed by the CPU only
+//! communicating with the PPU during the VBLANK period (after all visible scanlines have been drawn).
+//!
+//! The real PPU hardware renders one dot to the screen at a time, but this emulation takes a shortcut
+//! and renders entire scanlines one at a time. This means attempts to change PPU state in the middle of a
+//! scanline will not work correctly, but this behavior appears to be very rare in actual programs
+
 use super::{bus::Bus, screen::FrameBuffer};
 use bitfield::{Bit, BitMut, BitRange, BitRangeMut};
 use ppu_registers::{PPUCTRL, PPUSTATUS};
@@ -27,14 +36,17 @@ register_bitfields! [
     ]
 ];
 
-#[repr(C)]
+/// The PPU stores a small amount of internal RAM called Object Attribute Memory. This is where all sprites
+/// and their properties are to be stored by the CPU in anticipation for their rendering to the screen.
 struct OAMSprite {
     y_pixel_coord: u8,
     tile_idx: u8,
     attribs: InMemoryRegister<u8, SpriteAttribs::Register>,
     x_pixel_coord: u8,
-    current_x: u8,
-    sprite_0: bool,
+    sprite_0: bool, // Sprite 0 is a special sprite that can be used to signal the CPU when the PPU has begun
+    // rendering it, for example so the CPU knows how much of the screen has been rendered
+    current_x: u8, // When drawing, we need to keep track of how many pixels along a scanline we have drawn
+                   // for this sprite
 }
 
 impl OAMSprite {
@@ -54,13 +66,14 @@ pub struct PPU {
     nametable_addr: u16,
     x_scroll: u8,
     y_scroll: u8,
-    pub scanlines: usize,
+    scanlines: usize,
     secondary_oam: Vec<OAMSprite>,
-    pub dots: usize,
+    dots: usize,
     generated_interrupt: bool,
 }
 
 impl PPU {
+    const VISIBLE_DOTS_PER_SCANLINE: usize = 256;
     const DOTS_PER_SCANLINE: usize = 341;
     const NUM_SCANLINES: usize = 262;
     pub fn new() -> Self {
@@ -75,6 +88,11 @@ impl PPU {
         }
     }
 
+    /// Steps the PPU simulation by one cycle. Returns when the fb has been fully updated for this frame
+    /// and is ready to present to the screen.
+    ///
+    /// Note that the PPU only updates the framebuffer when a full scanline's worth of cycles has been
+    /// completed.
     pub fn step<T: FrameBuffer>(&mut self, fb: &mut T, bus: &mut Bus) -> bool {
         // At the start of each scanline, we have to check if a split x scroll occured...
         if self.dots == 0 {
@@ -87,7 +105,7 @@ impl PPU {
         }
 
         // Each step processes a single dot/pixel
-        // Though in reality we don't render under the scanline is finished
+        // Though in reality we don't render until the scanline is finished
         self.dots += 1;
 
         if self.dots == PPU::DOTS_PER_SCANLINE {
@@ -129,6 +147,23 @@ impl PPU {
         return false;
     }
 
+    /// Checks whether the PPU has generated a NMI. Calls to this function will clear the pending MMI from the PPU.
+    pub fn generated_interrupt(&mut self) -> bool {
+        let res = self.generated_interrupt;
+        if self.generated_interrupt {
+            self.generated_interrupt = false;
+        }
+
+        res
+    }
+
+    /// Determines which sprites are occupying the NEXT scanline and will therefore need to be drawn during
+    /// the next scanline
+    ///
+    /// Sprites are drawn one scanline at a time, to make blending/transparency with the background colors
+    /// simpler to implement (and more accurate to how the real hardware works).
+    /// There are potential performance optimizations here, to not do O(n) search of the OAM every single
+    /// scanline
     // TODO: Max 8 Sprites
     fn sprite_evaluation(&mut self, next_scanline: usize, bus: &mut Bus) {
         self.secondary_oam.clear();
@@ -146,6 +181,7 @@ impl PPU {
         self.secondary_oam.reverse();
     }
 
+    /// Reconfigures the PPU state in preparation for beginning to render a new frame
     fn prepare_next_frame(&mut self, bus: &mut Bus) {
         self.scanlines = 0;
         // Update x_scroll and y_scroll
@@ -166,9 +202,10 @@ impl PPU {
             .modify(PPUCTRL::NTABLE_ADDR::Addr2000);
     }
 
-    // TODO: Handle sprite rendering
-    pub fn draw_scanline<T: FrameBuffer>(&mut self, fb: &mut T, bus: &mut Bus) {
+    /// Draws a single scanline into the framebuffer
+    fn draw_scanline<T: FrameBuffer>(&mut self, fb: &mut T, bus: &mut Bus) {
         let pixel_space_y = self.scanlines;
+        let (_, coarse_y) = self.get_coarse_coords();
 
         // x and y scroll represent the nametable pixel coordinate that is to be situated at the top-left
         // corner of the screen.
@@ -177,9 +214,8 @@ impl PPU {
         let mut fine_x_wrapped = self.x_scroll % 8;
         let fine_y_wrapped = self.y_scroll % 8;
 
-        let coarse_y = (self.nametable_addr as u16).bit_range(9, 5);
-
-        for pixel_space_x in 0..256 {
+        for pixel_space_x in 0..PPU::VISIBLE_DOTS_PER_SCANLINE {
+            let (coarse_x, _) = self.get_coarse_coords();
             // Compute pattern table idx and palette idx
             // This monstrosity taken from https://www.nesdev.org/wiki/PPU_scrolling#Wrapping_around
             let attrib_table_addr = 0x23C0
@@ -187,15 +223,14 @@ impl PPU {
                 | ((self.nametable_addr >> 4) & 0x38)
                 | ((self.nametable_addr >> 2) & 0x07);
             let attrib_table_val = bus.ppu_read_nametable(attrib_table_addr as usize).unwrap();
-            let coarse_x = (self.nametable_addr as u16).bit_range(4, 0);
             let pt_idx = bus
                 .ppu_read_nametable(self.nametable_addr as usize)
                 .unwrap();
-            let palette_num_bg = PPU::compute_bg_palette_num(attrib_table_val, coarse_x, coarse_y);
 
+            // Get tile data bg color
+            let palette_num_bg = PPU::compute_bg_palette_num(attrib_table_val, coarse_x, coarse_y);
             // Get the chr tile data, a 16 byte chunk representing an individual 8x8 tile
             let tile = bus.ppu_get_pattern_entry(pt_idx, true);
-
             let palette_idx_bg = PPU::compute_bg_palette_idx(
                 tile,
                 fine_x_wrapped,
@@ -205,21 +240,23 @@ impl PPU {
                 .palette_memory
                 .get_color_by_idx(palette_num_bg, palette_idx_bg)
                 .unwrap();
-            fb.plot_pixel(pixel_space_x, pixel_space_y, bg_color);
 
-            // Handle sprites
+            // Write the bg pixel into the fb. This may be overwritten by a sprite
+            fb.plot_pixel(pixel_space_x, pixel_space_y, bg_color);
             let bg_pixel_transparent = bus
                 .palette_memory
                 .is_entry_transparent(palette_num_bg, palette_idx_bg);
+
+            // Handle sprites
             let sprite_iter = self
                 .secondary_oam
                 .iter_mut()
                 .filter(|sprite| sprite.current_x == pixel_space_x as u8);
             for sprite in sprite_iter {
                 if sprite.current_x >= sprite.x_pixel_coord.checked_add(8).unwrap_or(255) {
-                    continue; // No more drawing needed for this scanline
+                    continue; // No more drawing needed for this sprite on this scanline
                 }
-                // Render a single pixel of a sprite
+                // Prepare to render a single pixel of a sprite
                 let sprite_data = bus.ppu_get_pattern_entry(sprite.tile_idx, false);
                 let sprite_palette_idx = PPU::compute_palette_idx(
                     sprite_data,
@@ -257,7 +294,7 @@ impl PPU {
                 sprite.current_x += 1;
             }
 
-            // Handle offset x wrapping into the nametable entry
+            // Handle offset x wrapping into the next nametable entry
             fine_x_wrapped += 1;
             if fine_x_wrapped > 7 {
                 fine_x_wrapped = 0;
@@ -290,7 +327,15 @@ impl PPU {
         }
     }
 
-    pub fn compute_palette_idx(
+    fn get_coarse_coords(&mut self) -> (u8, u8) {
+        // Our coarse coordinates index into individual cells in the nametable
+        let coarse_y = (self.nametable_addr as u16).bit_range(9, 5);
+        let coarse_x = (self.nametable_addr as u16).bit_range(4, 0);
+
+        (coarse_x, coarse_y)
+    }
+
+    fn compute_palette_idx(
         tile_data: &[u8],
         x_coord: u8,
         y_coord: u8,
@@ -314,11 +359,11 @@ impl PPU {
         low_bit + (high_bit << 1)
     }
 
-    pub fn compute_bg_palette_idx(tile_data: &[u8], x_coord: u8, y_coord: u8) -> u8 {
+    fn compute_bg_palette_idx(tile_data: &[u8], x_coord: u8, y_coord: u8) -> u8 {
         PPU::compute_palette_idx(tile_data, x_coord, y_coord, false, false)
     }
 
-    pub fn compute_bg_palette_num(attrib_value: u8, coarse_x: u8, coarse_y: u8) -> u8 {
+    fn compute_bg_palette_num(attrib_value: u8, coarse_x: u8, coarse_y: u8) -> u8 {
         // The second bit of our tile coordinates contains the information
         // we need to determine our quadrant
         match (coarse_y.bit(1), coarse_x.bit(1)) {
@@ -327,14 +372,5 @@ impl PPU {
             (true, false) => attrib_value.bit_range(5, 4),
             (true, true) => attrib_value.bit_range(7, 6),
         }
-    }
-
-    pub fn generated_interrupt(&mut self) -> bool {
-        let res = self.generated_interrupt;
-        if self.generated_interrupt {
-            self.generated_interrupt = false;
-        }
-
-        res
     }
 }
