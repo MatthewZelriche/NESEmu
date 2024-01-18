@@ -14,7 +14,7 @@ use super::{
 pub enum AddressMode {
     IMPLIED,
     IMMEDIATE,
-    ABSOLUTE(bool),
+    ABSOLUTE(bool), // Boolean value is for debug printing only
     RELATIVE,
     ZEROPAGE,
     ZEROPAGEX,
@@ -37,6 +37,631 @@ pub struct Opcode {
 }
 
 impl CPU {
+    /// Fetches, decodes and executes a single instruction based on a given 8-bit opcode value
+    pub fn execute_opcode<'a>(
+        &'a mut self,
+        opcode_val: u8,
+        bus: &'a mut Bus,
+        log_opcode: bool,
+    ) -> Result<u8, &'static str> {
+        let opcode = self.lookup_opcode(opcode_val, bus)?;
+        if log_opcode {
+            // We don't care if this succeeds or not, since the logging info is optional
+            let _ = self.write_opcode(&opcode, bus);
+        }
+
+        let addr = self.fetch_operand_address(&opcode, bus)?;
+        (opcode.execute)(self, addr, &opcode, bus)
+    }
+
+    fn fetch_zero_more_bytes(&mut self, opcode: u8) -> [u8; 3] {
+        [opcode, 0x0, 0x0]
+    }
+
+    fn fetch_one_more_bytes(&mut self, opcode: u8, bus: &mut Bus) -> Result<[u8; 3], &'static str> {
+        let bytes = [
+            opcode,
+            bus.cpu_read_byte(self.registers.program_counter)?,
+            0x0,
+        ];
+        self.registers.program_counter += 1;
+        Ok(bytes)
+    }
+
+    fn fetch_two_more_bytes(&mut self, opcode: u8, bus: &mut Bus) -> Result<[u8; 3], &'static str> {
+        let mut bytes = [opcode, 0x0, 0x0];
+        bus.cpu_read_exact(self.registers.program_counter, &mut bytes[1..])?;
+        self.registers.program_counter += 2;
+        Ok(bytes)
+    }
+
+    fn fetch_operand_address(
+        &mut self,
+        opcode: &Opcode,
+        bus: &mut Bus,
+    ) -> Result<usize, &'static str> {
+        match opcode.mode {
+            AddressMode::IMPLIED | AddressMode::ACCUMULATOR => Ok(0x0), // Address is irrelevant for implied and ACC
+            AddressMode::IMMEDIATE => Ok(self.registers.program_counter - 1),
+            AddressMode::ABSOLUTE(_) => {
+                Ok(u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize)
+            }
+            AddressMode::RELATIVE => {
+                // Relative uses a SIGNED offset!
+                // TODO: This may crash if relative is allowed to address in a wrapping fashion (eg 0xFFFF -> zero page)
+                let signed_operand = i8::from_le_bytes([opcode.bytes[1]]) as isize;
+                Ok((signed_operand + self.registers.program_counter as isize) as usize)
+            }
+            AddressMode::ZEROPAGE => Ok(opcode.bytes[1] as usize),
+            AddressMode::INDIRECTX => {
+                // Indirect zeropage is tricky, because if we are given a lsb of 0xFF,
+                // we need to discover the high byte at 0x00, not 0x100
+                let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg) as usize;
+                let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
+                let addr_bytes = [bus.cpu_read_byte(lsb_addr)?, bus.cpu_read_byte(msb_addr)?];
+                Ok(u16::from_le_bytes(addr_bytes) as usize)
+            }
+            AddressMode::INDIRECTY => {
+                let addr = self.fetch_indirect_y_base_addr(opcode, bus)? as u16;
+                Ok(addr.wrapping_add(self.registers.y_reg as u16) as usize)
+            }
+            AddressMode::ABSOLUTEX => Ok((self.fetch_absolute_base_addr(opcode) as u16)
+                .wrapping_add(self.registers.x_reg as u16)
+                as usize),
+            AddressMode::ABSOLUTEY => Ok((self.fetch_absolute_base_addr(opcode) as u16)
+                .wrapping_add(self.registers.y_reg as u16)
+                as usize),
+            AddressMode::INDIRECT => {
+                let base_addr = self.fetch_absolute_base_addr(opcode);
+                // Have to emulate a cpu bug with indirect mode
+                let base_addr_msb_wrap = CPU::PAGE_SZ_MASK & base_addr;
+                // Don't attempt a division by zero under certain circumstances
+                let base_addr_msb = if base_addr_msb_wrap != 0 {
+                    (((base_addr + 1) % base_addr_msb_wrap) as u8) as usize | base_addr_msb_wrap
+                } else {
+                    base_addr + 1
+                };
+                let addr_bytes = [
+                    bus.cpu_read_byte(base_addr)?,
+                    bus.cpu_read_byte(base_addr_msb)?,
+                ];
+                Ok(u16::from_le_bytes(addr_bytes) as usize)
+            }
+            AddressMode::ZEROPAGEX => {
+                let base_addr = opcode.bytes[1];
+                Ok(base_addr.wrapping_add(self.registers.x_reg) as usize)
+            }
+            AddressMode::ZEROPAGEY => {
+                let base_addr = opcode.bytes[1];
+                Ok(base_addr.wrapping_add(self.registers.y_reg) as usize)
+            }
+        }
+    }
+
+    fn fetch_indirect_y_base_addr(
+        &self,
+        opcode: &Opcode,
+        bus: &mut Bus,
+    ) -> Result<usize, &'static str> {
+        let lsb_addr = opcode.bytes[1] as usize;
+        let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
+        let addr_bytes = [bus.cpu_read_byte(lsb_addr)?, bus.cpu_read_byte(msb_addr)?];
+        Ok(u16::from_le_bytes(addr_bytes) as usize)
+    }
+
+    fn fetch_absolute_base_addr(&self, opcode: &Opcode) -> usize {
+        u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize
+    }
+
+    /// Given an opcode and CPU state, potentially adjust the number of CPU cycles this instruction took to
+    /// account for instructions of variable cycle length
+    fn adjust_cycles(
+        &mut self,
+        addr: usize,
+        opcode: &Opcode,
+        bus: &mut Bus,
+    ) -> Result<u8, &'static str> {
+        let mut cycles = opcode.cycles;
+        let base_addr = match opcode.mode {
+            AddressMode::INDIRECTY => self.fetch_indirect_y_base_addr(opcode, bus)?,
+            AddressMode::ABSOLUTEX => self.fetch_absolute_base_addr(opcode),
+            AddressMode::ABSOLUTEY => self.fetch_absolute_base_addr(opcode),
+            _ => return Ok(cycles),
+        };
+
+        if CPU::will_cross_boundary(base_addr, addr) {
+            cycles += 1;
+        }
+        Ok(cycles)
+    }
+
+    fn rti(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let mut byte = [0];
+        self.pop_stack(&mut byte, bus)?;
+        self.set_status_register(byte[0]);
+
+        let mut pc = [0u8; 2];
+        self.pop_stack(&mut pc, bus)?;
+        self.registers.program_counter = u16::from_le_bytes(pc) as usize;
+
+        Ok(opcode.cycles)
+    }
+
+    fn sbc(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let old_accumulator = self.registers.accumulator;
+        let mut mem = bus.cpu_read_byte(addr)?;
+        mem ^= 0xFF; // Only difference from ADC is that we xor the memory byte thanks to two's complement
+        let val16bit: u16 = self.registers.accumulator as u16
+            + mem as u16
+            + self.registers.status_register.is_set(Status::CARRY) as u16;
+        self.registers.accumulator = (val16bit & 0xFF) as u8; // Drop the 8th bit
+        self.set_status_bit_if(0, val16bit.bit(8));
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(
+            6,
+            ((val16bit ^ old_accumulator as u16) & (val16bit ^ mem as u16)).bit(7),
+        );
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn adc(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let old_accumulator = self.registers.accumulator;
+        let mem = bus.cpu_read_byte(addr)?;
+        let val16bit: u16 = self.registers.accumulator as u16
+            + mem as u16
+            + self.registers.status_register.is_set(Status::CARRY) as u16;
+        self.registers.accumulator = (val16bit & 0xFF) as u8; // Drop the 8th bit
+        self.set_status_bit_if(0, val16bit.bit(8));
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(
+            6,
+            ((val16bit ^ old_accumulator as u16) & (val16bit ^ mem as u16)).bit(7),
+        );
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn plp(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let mut byte = [0u8];
+        self.pop_stack(&mut byte, bus)?;
+        self.set_status_register(byte[0]);
+        Ok(opcode.cycles)
+    }
+
+    fn pla(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let mut byte = [0u8];
+        self.pop_stack(&mut byte, bus)?;
+        self.registers.accumulator = byte[0];
+        self.set_status_bit_if(1, byte[0] == 0);
+        self.set_status_bit_if(7, byte[0].bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn php(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        // Instructions that push status flags to the stack always push BFLAG as set
+        let mut copy = self.registers.status_register.extract();
+        copy.modify(Status::BFLAG::SET);
+
+        let byte = [copy.get()];
+        self.push_stack(&byte, bus)?;
+        Ok(opcode.cycles)
+    }
+
+    fn pha(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let byte = [self.registers.accumulator];
+        self.push_stack(&byte, bus)?;
+        Ok(opcode.cycles)
+    }
+
+    fn nop(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        Ok(opcode.cycles)
+    }
+
+    fn clc(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.status_register.modify(Status::CARRY::CLEAR);
+        Ok(opcode.cycles)
+    }
+
+    fn cli(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::INT_DISABLE::CLEAR);
+        Ok(opcode.cycles)
+    }
+
+    fn sei(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::INT_DISABLE::SET);
+        Ok(opcode.cycles)
+    }
+
+    fn sed(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.status_register.modify(Status::DECIMAL::SET);
+        Ok(opcode.cycles)
+    }
+
+    fn clv(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::OVERFLOW::CLEAR);
+        Ok(opcode.cycles)
+    }
+
+    fn cld(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers
+            .status_register
+            .modify(Status::DECIMAL::CLEAR);
+        Ok(opcode.cycles)
+    }
+
+    fn sec(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.status_register.modify(Status::CARRY::SET);
+        Ok(opcode.cycles)
+    }
+
+    fn and(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.accumulator &= bus.cpu_read_byte(addr)?;
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn ora(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.accumulator |= bus.cpu_read_byte(addr)?;
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn eor(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.accumulator ^= bus.cpu_read_byte(addr)?;
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn jsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        // Store the current program counter (which, right now, points to the NEXT
+        // instruction after the one we are processing)
+        // big endian because we need to push to the stack in reverse order of how they should be
+        self.push_stack(
+            &u16::to_be_bytes((self.registers.program_counter - 1) as u16),
+            bus,
+        )?;
+        self.registers.program_counter = addr;
+        Ok(opcode.cycles)
+    }
+
+    fn rts(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let mut addr_bytes = [0u8; 2];
+        self.pop_stack(&mut addr_bytes, bus)?;
+        self.registers.program_counter = (u16::from_le_bytes(addr_bytes) + 1) as usize;
+        Ok(opcode.cycles)
+    }
+
+    fn bit(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let byte = bus.cpu_read_byte(addr)?;
+        self.set_status_bit_if(1, self.registers.accumulator & byte == 0);
+        self.set_status_bit_if(6, byte.bit(6));
+        self.set_status_bit_if(7, byte.bit(7));
+
+        Ok(opcode.cycles)
+    }
+
+    fn cmp(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.accumulator, opcode, bus)
+    }
+
+    fn cpy(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.y_reg, opcode, bus)
+    }
+
+    fn cpx(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        self.compare_reg(addr, self.registers.x_reg, opcode, bus)
+    }
+
+    fn compare_reg(
+        &mut self,
+        addr: usize,
+        reg_val: u8,
+        opcode: &Opcode,
+        bus: &mut Bus,
+    ) -> Result<u8, &'static str> {
+        let byte = bus.cpu_read_byte(addr)?;
+        self.set_status_bit_if(0, reg_val >= byte);
+        self.set_status_bit_if(1, reg_val == byte);
+        self.set_status_bit_if(7, reg_val.wrapping_sub(byte).bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn tay(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.y_reg = self.registers.accumulator;
+        self.set_status_bit_if(1, self.registers.y_reg == 0);
+        self.set_status_bit_if(7, self.registers.y_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn tya(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.accumulator = self.registers.y_reg;
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn tax(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.accumulator;
+        self.set_status_bit_if(1, self.registers.x_reg == 0);
+        self.set_status_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn txa(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.accumulator = self.registers.x_reg;
+        self.set_status_bit_if(1, self.registers.accumulator == 0);
+        self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn tsx(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.stack_ptr as u8;
+        self.set_status_bit_if(1, self.registers.x_reg == 0);
+        self.set_status_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn txs(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.stack_ptr = self.registers.x_reg as usize;
+        Ok(opcode.cycles)
+    }
+
+    fn iny(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.y_reg = self.registers.y_reg.wrapping_add(1);
+        self.set_status_bit_if(1, self.registers.y_reg == 0);
+        self.set_status_bit_if(7, self.registers.y_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn dey(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.y_reg = self.registers.y_reg.wrapping_sub(1);
+        self.set_status_bit_if(1, self.registers.y_reg == 0);
+        self.set_status_bit_if(7, self.registers.y_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn inx(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.x_reg.wrapping_add(1);
+        self.set_status_bit_if(1, self.registers.x_reg == 0);
+        self.set_status_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn dex(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.x_reg = self.registers.x_reg.wrapping_sub(1);
+        self.set_status_bit_if(1, self.registers.x_reg == 0);
+        self.set_status_bit_if(7, self.registers.x_reg.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn inc(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let new_byte = bus.cpu_read_byte(addr)?.wrapping_add(1);
+        bus.cpu_write_byte(addr, new_byte)?;
+        self.set_status_bit_if(1, new_byte == 0);
+        self.set_status_bit_if(7, new_byte.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn dec(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let new_byte = bus.cpu_read_byte(addr)?.wrapping_sub(1);
+        bus.cpu_write_byte(addr, new_byte)?;
+        self.set_status_bit_if(1, new_byte == 0);
+        self.set_status_bit_if(7, new_byte.bit(7));
+        Ok(opcode.cycles)
+    }
+
+    fn sta(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        bus.cpu_write_byte(addr, self.registers.accumulator)?;
+        Ok(opcode.cycles)
+    }
+
+    fn stx(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        bus.cpu_write_byte(addr as usize, self.registers.x_reg)?;
+        Ok(opcode.cycles)
+    }
+
+    fn sty(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        bus.cpu_write_byte(addr as usize, self.registers.y_reg)?;
+        Ok(opcode.cycles)
+    }
+
+    fn ldy(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let byte = bus.cpu_read_byte(addr)?;
+        self.registers.y_reg = byte;
+        self.set_status_bit_if(1, byte == 0);
+        self.set_status_bit_if(7, byte.bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn ldx(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let byte = bus.cpu_read_byte(addr)?;
+        self.registers.x_reg = byte;
+        self.set_status_bit_if(1, byte == 0);
+        self.set_status_bit_if(7, byte.bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn lda(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        let byte = bus.cpu_read_byte(addr)?;
+        self.registers.accumulator = byte;
+        self.set_status_bit_if(1, byte == 0);
+        self.set_status_bit_if(7, byte.bit(7));
+        self.adjust_cycles(addr, opcode, bus)
+    }
+
+    fn lsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        match opcode.mode {
+            AddressMode::ACCUMULATOR => {
+                self.set_status_bit_if(0, self.registers.accumulator.bit(0));
+                self.registers.accumulator = self.registers.accumulator >> 1;
+                self.set_status_bit_if(1, self.registers.accumulator == 0);
+                self.registers
+                    .status_register
+                    .modify(Status::NEGATIVE::CLEAR);
+            }
+            _ => {
+                let mut byte = bus.cpu_read_byte(addr)?;
+                self.set_status_bit_if(0, byte.bit(0));
+                byte = byte >> 1;
+                bus.cpu_write_byte(addr, byte)?;
+                self.set_status_bit_if(1, byte == 0);
+                self.registers
+                    .status_register
+                    .modify(Status::NEGATIVE::CLEAR);
+            }
+        }
+
+        Ok(opcode.cycles)
+    }
+
+    fn asl(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        match opcode.mode {
+            AddressMode::ACCUMULATOR => {
+                self.set_status_bit_if(0, self.registers.accumulator.bit(7));
+                self.registers.accumulator = self.registers.accumulator << 1;
+                self.set_status_bit_if(1, self.registers.accumulator == 0);
+                self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+            }
+            _ => {
+                let mut byte = bus.cpu_read_byte(addr)?;
+                self.set_status_bit_if(0, byte.bit(7));
+                byte = byte << 1;
+                bus.cpu_write_byte(addr, byte)?;
+                self.set_status_bit_if(1, byte == 0);
+                self.set_status_bit_if(7, byte.bit(7));
+            }
+        }
+        Ok(opcode.cycles)
+    }
+
+    fn ror(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        match opcode.mode {
+            AddressMode::ACCUMULATOR => {
+                let new_carry = self.registers.accumulator.bit(0);
+                self.registers.accumulator = self.registers.accumulator >> 1;
+                self.registers
+                    .accumulator
+                    .set_bit(7, self.registers.status_register.is_set(Status::CARRY));
+                self.set_status_bit_if(0, new_carry);
+                self.set_status_bit_if(1, self.registers.accumulator == 0);
+                self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+            }
+            _ => {
+                let mut byte = bus.cpu_read_byte(addr)?;
+                let new_carry = byte.bit(0);
+                byte = byte >> 1;
+                byte.set_bit(7, self.registers.status_register.is_set(Status::CARRY));
+                bus.cpu_write_byte(addr, byte)?;
+                self.set_status_bit_if(0, new_carry);
+                self.set_status_bit_if(1, byte == 0);
+                self.set_status_bit_if(7, byte.bit(7));
+            }
+        }
+        Ok(opcode.cycles)
+    }
+
+    fn rol(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
+        match opcode.mode {
+            AddressMode::ACCUMULATOR => {
+                let new_carry = self.registers.accumulator.bit(7);
+                self.registers.accumulator = self.registers.accumulator << 1;
+                self.registers
+                    .accumulator
+                    .set_bit(0, self.registers.status_register.is_set(Status::CARRY));
+                self.set_status_bit_if(0, new_carry);
+                self.set_status_bit_if(1, self.registers.accumulator == 0);
+                self.set_status_bit_if(7, self.registers.accumulator.bit(7));
+            }
+            _ => {
+                let mut byte = bus.cpu_read_byte(addr)?;
+                let new_carry = byte.bit(7);
+                byte = byte << 1;
+                byte.set_bit(0, self.registers.status_register.is_set(Status::CARRY));
+                bus.cpu_write_byte(addr, byte)?;
+                self.set_status_bit_if(0, new_carry);
+                self.set_status_bit_if(1, byte == 0);
+                self.set_status_bit_if(7, byte.bit(7));
+            }
+        }
+        Ok(opcode.cycles)
+    }
+
+    fn jmp(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.registers.program_counter = addr as usize;
+        Ok(opcode.cycles)
+    }
+
+    fn bcc(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::CARRY)
+    }
+
+    fn bcs(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::CARRY)
+    }
+
+    fn beq(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::ZERO)
+    }
+
+    fn bne(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::ZERO)
+    }
+
+    fn bvs(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::OVERFLOW)
+    }
+
+    fn bvc(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::OVERFLOW)
+    }
+
+    fn bpl(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, false, opcode.cycles, Status::NEGATIVE)
+    }
+
+    fn bmi(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
+        self.branchif(addr, true, opcode.cycles, Status::NEGATIVE)
+    }
+
+    fn branchif(
+        &mut self,
+        addr: usize,
+        set: bool,
+        mut cycle_count: u8,
+        flag: Field<u8, Register>,
+    ) -> Result<u8, &'static str> {
+        let check = if set {
+            self.registers.status_register.is_set(flag)
+        } else {
+            !self.registers.status_register.is_set(flag)
+        };
+
+        if check {
+            cycle_count += 1;
+            let new_addr = addr;
+
+            if CPU::will_cross_boundary(new_addr, self.registers.program_counter) {
+                cycle_count += 1;
+            }
+
+            self.registers.program_counter = new_addr;
+        }
+
+        Ok(cycle_count)
+    }
+
     pub fn lookup_opcode(&mut self, opcode: u8, bus: &mut Bus) -> Result<Opcode, &'static str> {
         match opcode {
             0x00 => todo!(),
@@ -55,14 +680,6 @@ impl CPU {
                 cycles: 3,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::ora,
-            }),
-            0x18 => Ok(Opcode {
-                mnemonic: "CLC",
-                mode: AddressMode::IMPLIED,
-                num_bytes: 1,
-                cycles: 2,
-                bytes: self.fetch_zero_more_bytes(opcode),
-                execute: CPU::clc,
             }),
             0x06 => Ok(Opcode {
                 mnemonic: "ASL",
@@ -144,6 +761,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::asl,
             }),
+            0x18 => Ok(Opcode {
+                mnemonic: "CLC",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::clc,
+            }),
             0x19 => Ok(Opcode {
                 mnemonic: "ORA",
                 mode: AddressMode::ABSOLUTEY,
@@ -216,14 +841,6 @@ impl CPU {
                 bytes: self.fetch_zero_more_bytes(opcode),
                 execute: CPU::plp,
             }),
-            0x2A => Ok(Opcode {
-                mnemonic: "ROL",
-                mode: AddressMode::ACCUMULATOR,
-                num_bytes: 1,
-                cycles: 2,
-                bytes: self.fetch_zero_more_bytes(opcode),
-                execute: CPU::rol,
-            }),
             0x29 => Ok(Opcode {
                 mnemonic: "AND",
                 mode: AddressMode::IMMEDIATE,
@@ -231,6 +848,14 @@ impl CPU {
                 cycles: 2,
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::and,
+            }),
+            0x2A => Ok(Opcode {
+                mnemonic: "ROL",
+                mode: AddressMode::ACCUMULATOR,
+                num_bytes: 1,
+                cycles: 2,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::rol,
             }),
             0x2C => Ok(Opcode {
                 mnemonic: "BIT",
@@ -352,6 +977,14 @@ impl CPU {
                 bytes: self.fetch_one_more_bytes(opcode, bus)?,
                 execute: CPU::lsr,
             }),
+            0x48 => Ok(Opcode {
+                mnemonic: "PHA",
+                mode: AddressMode::IMPLIED,
+                num_bytes: 1,
+                cycles: 3,
+                bytes: self.fetch_zero_more_bytes(opcode),
+                execute: CPU::pha,
+            }),
             0x49 => Ok(Opcode {
                 mnemonic: "EOR",
                 mode: AddressMode::IMMEDIATE,
@@ -391,14 +1024,6 @@ impl CPU {
                 cycles: 6,
                 bytes: self.fetch_two_more_bytes(opcode, bus)?,
                 execute: CPU::lsr,
-            }),
-            0x48 => Ok(Opcode {
-                mnemonic: "PHA",
-                mode: AddressMode::IMPLIED,
-                num_bytes: 1,
-                cycles: 3,
-                bytes: self.fetch_zero_more_bytes(opcode),
-                execute: CPU::pha,
             }),
             0x50 => Ok(Opcode {
                 mnemonic: "BVC",
@@ -1244,631 +1869,11 @@ impl CPU {
         }
     }
 
-    pub fn execute_opcode<'a>(
-        &'a mut self,
-        opcode_val: u8,
-        bus: &'a mut Bus,
-        log_opcode: bool,
-    ) -> Result<u8, &'static str> {
-        let opcode = self.lookup_opcode(opcode_val, bus)?;
-        if log_opcode {
-            // We don't care if this succeeds or not, since the logging info is optional
-            let _ = self.write_opcode(&opcode, bus);
-        }
-
-        let addr = self.fetch_operand_address(&opcode, bus)?;
-        (opcode.execute)(self, addr, &opcode, bus)
-    }
-
-    fn fetch_zero_more_bytes(&mut self, opcode: u8) -> [u8; 3] {
-        [opcode, 0x0, 0x0]
-    }
-
-    fn fetch_one_more_bytes(&mut self, opcode: u8, bus: &mut Bus) -> Result<[u8; 3], &'static str> {
-        let bytes = [
-            opcode,
-            bus.cpu_read_byte(self.registers.program_counter)?,
-            0x0,
-        ];
-        self.registers.program_counter += 1;
-        Ok(bytes)
-    }
-
-    fn fetch_two_more_bytes(&mut self, opcode: u8, bus: &mut Bus) -> Result<[u8; 3], &'static str> {
-        let mut bytes = [opcode, 0x0, 0x0];
-        bus.cpu_read_exact(self.registers.program_counter, &mut bytes[1..])?;
-        self.registers.program_counter += 2;
-        Ok(bytes)
-    }
-
-    fn fetch_operand_address(
-        &mut self,
-        opcode: &Opcode,
-        bus: &mut Bus,
-    ) -> Result<usize, &'static str> {
-        match opcode.mode {
-            AddressMode::IMPLIED | AddressMode::ACCUMULATOR => Ok(0x0), // Address is irrelevant for implied and ACC
-            AddressMode::IMMEDIATE => Ok(self.registers.program_counter - 1),
-            AddressMode::ABSOLUTE(_) => {
-                Ok(u16::from_le_bytes(opcode.bytes[1..].try_into().unwrap()) as usize)
-            }
-            AddressMode::RELATIVE => {
-                // Relative uses a SIGNED offset!
-                // TODO: This may crash if relative is allowed to address in a wrapping fashion (eg 0xFFFF -> zero page)
-                let signed_operand = i8::from_le_bytes([opcode.bytes[1]]) as isize;
-                Ok((signed_operand + self.registers.program_counter as isize) as usize)
-            }
-            AddressMode::ZEROPAGE => Ok(opcode.bytes[1] as usize),
-            AddressMode::INDIRECTX => {
-                // Indirect zeropage is tricky, because if we are given a lsb of 0xFF,
-                // we need to discover the high byte at 0x00, not 0x100
-                let lsb_addr = opcode.bytes[1].wrapping_add(self.registers.x_reg) as usize;
-                let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
-                let addr_bytes = [bus.cpu_read_byte(lsb_addr)?, bus.cpu_read_byte(msb_addr)?];
-                Ok(u16::from_le_bytes(addr_bytes) as usize)
-            }
-            AddressMode::INDIRECTY => {
-                let addr = self.fetch_indirect_y_base_addr(opcode, bus)? as u16;
-                Ok(addr.wrapping_add(self.registers.y_reg as u16) as usize)
-            }
-            AddressMode::ABSOLUTEX => Ok((self.fetch_absolute_base_addr(opcode) as u16)
-                .wrapping_add(self.registers.x_reg as u16)
-                as usize),
-            AddressMode::ABSOLUTEY => Ok((self.fetch_absolute_base_addr(opcode) as u16)
-                .wrapping_add(self.registers.y_reg as u16)
-                as usize),
-            AddressMode::INDIRECT => {
-                let base_addr = self.fetch_absolute_base_addr(opcode);
-                // Have to emulate a cpu bug with indirect mode
-                let base_addr_msb_wrap = CPU::PAGE_SZ_MASK & base_addr;
-                // Don't attempt a division by zero under certain circumstances
-                let base_addr_msb = if base_addr_msb_wrap != 0 {
-                    (((base_addr + 1) % base_addr_msb_wrap) as u8) as usize | base_addr_msb_wrap
-                } else {
-                    base_addr + 1
-                };
-                let addr_bytes = [
-                    bus.cpu_read_byte(base_addr)?,
-                    bus.cpu_read_byte(base_addr_msb)?,
-                ];
-                Ok(u16::from_le_bytes(addr_bytes) as usize)
-            }
-            AddressMode::ZEROPAGEX => {
-                let base_addr = opcode.bytes[1];
-                Ok(base_addr.wrapping_add(self.registers.x_reg) as usize)
-            }
-            AddressMode::ZEROPAGEY => {
-                let base_addr = opcode.bytes[1];
-                Ok(base_addr.wrapping_add(self.registers.y_reg) as usize)
-            }
-        }
-    }
-
-    fn fetch_indirect_y_base_addr(
-        &self,
-        opcode: &Opcode,
-        bus: &mut Bus,
-    ) -> Result<usize, &'static str> {
-        let lsb_addr = opcode.bytes[1] as usize;
-        let msb_addr = (lsb_addr as u8).wrapping_add(1) as usize;
-        let addr_bytes = [bus.cpu_read_byte(lsb_addr)?, bus.cpu_read_byte(msb_addr)?];
-        Ok(u16::from_le_bytes(addr_bytes) as usize)
-    }
-
-    fn fetch_absolute_base_addr(&self, opcode: &Opcode) -> usize {
-        u16::from_le_bytes([opcode.bytes[1], opcode.bytes[2]]) as usize
-    }
-
-    fn adjust_cycles(
-        &mut self,
-        addr: usize,
-        opcode: &Opcode,
-        bus: &mut Bus,
-    ) -> Result<u8, &'static str> {
-        let mut cycles = opcode.cycles;
-        let base_addr = match opcode.mode {
-            AddressMode::INDIRECTY => self.fetch_indirect_y_base_addr(opcode, bus)?,
-            AddressMode::ABSOLUTEX => self.fetch_absolute_base_addr(opcode),
-            AddressMode::ABSOLUTEY => self.fetch_absolute_base_addr(opcode),
-            _ => return Ok(cycles),
-        };
-
-        if CPU::will_cross_boundary(base_addr, addr) {
-            cycles += 1;
-        }
-        Ok(cycles)
-    }
-
-    fn rti(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let mut byte = [0];
-        self.pop_stack(&mut byte, bus)?;
-        self.set_status_register(byte[0]);
-
-        let mut pc = [0u8; 2];
-        self.pop_stack(&mut pc, bus)?;
-        self.registers.program_counter = u16::from_le_bytes(pc) as usize;
-
-        Ok(opcode.cycles)
-    }
-
-    fn sbc(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let old_accumulator = self.registers.accumulator;
-        let mut mem = bus.cpu_read_byte(addr)?;
-        mem ^= 0xFF; // Only difference from ADC is that we xor the memory byte thanks to two's complement
-        let val16bit: u16 = self.registers.accumulator as u16
-            + mem as u16
-            + self.registers.status_register.is_set(Status::CARRY) as u16;
-        self.registers.accumulator = (val16bit & 0xFF) as u8; // Drop the 8th bit
-        self.set_flag_bit_if(0, val16bit.bit(8));
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(
-            6,
-            ((val16bit ^ old_accumulator as u16) & (val16bit ^ mem as u16)).bit(7),
-        );
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn adc(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let old_accumulator = self.registers.accumulator;
-        let mem = bus.cpu_read_byte(addr)?;
-        let val16bit: u16 = self.registers.accumulator as u16
-            + mem as u16
-            + self.registers.status_register.is_set(Status::CARRY) as u16;
-        self.registers.accumulator = (val16bit & 0xFF) as u8; // Drop the 8th bit
-        self.set_flag_bit_if(0, val16bit.bit(8));
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(
-            6,
-            ((val16bit ^ old_accumulator as u16) & (val16bit ^ mem as u16)).bit(7),
-        );
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn plp(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let mut byte = [0u8];
-        self.pop_stack(&mut byte, bus)?;
-        self.set_status_register(byte[0]);
-        Ok(opcode.cycles)
-    }
-
-    fn pla(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let mut byte = [0u8];
-        self.pop_stack(&mut byte, bus)?;
-        self.registers.accumulator = byte[0];
-        self.set_flag_bit_if(1, byte[0] == 0);
-        self.set_flag_bit_if(7, byte[0].bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn php(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        // Instructions that push status flags to the stack always push BFLAG as set
-        let mut copy = self.registers.status_register.extract();
-        copy.modify(Status::BFLAG::SET);
-
-        let byte = [copy.get()];
-        self.push_stack(&byte, bus)?;
-        Ok(opcode.cycles)
-    }
-
-    fn pha(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let byte = [self.registers.accumulator];
-        self.push_stack(&byte, bus)?;
-        Ok(opcode.cycles)
-    }
-
-    fn nop(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        Ok(opcode.cycles)
-    }
-
-    fn clc(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.status_register.modify(Status::CARRY::CLEAR);
-        Ok(opcode.cycles)
-    }
-
-    fn cli(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers
-            .status_register
-            .modify(Status::INT_DISABLE::CLEAR);
-        Ok(opcode.cycles)
-    }
-
-    fn sei(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers
-            .status_register
-            .modify(Status::INT_DISABLE::SET);
-        Ok(opcode.cycles)
-    }
-
-    fn sed(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.status_register.modify(Status::DECIMAL::SET);
-        Ok(opcode.cycles)
-    }
-
-    fn clv(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers
-            .status_register
-            .modify(Status::OVERFLOW::CLEAR);
-        Ok(opcode.cycles)
-    }
-
-    fn cld(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers
-            .status_register
-            .modify(Status::DECIMAL::CLEAR);
-        Ok(opcode.cycles)
-    }
-
-    fn sec(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.status_register.modify(Status::CARRY::SET);
-        Ok(opcode.cycles)
-    }
-
-    fn and(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.accumulator &= bus.cpu_read_byte(addr)?;
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn ora(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.accumulator |= bus.cpu_read_byte(addr)?;
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn eor(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.accumulator ^= bus.cpu_read_byte(addr)?;
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn jsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        // Store the current program counter (which, right now, points to the NEXT
-        // instruction after the one we are processing)
-        // big endian because we need to push to the stack in reverse order of how they should be
-        self.push_stack(
-            &u16::to_be_bytes((self.registers.program_counter - 1) as u16),
-            bus,
-        )?;
-        self.registers.program_counter = addr;
-        Ok(opcode.cycles)
-    }
-
-    fn rts(&mut self, _: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let mut addr_bytes = [0u8; 2];
-        self.pop_stack(&mut addr_bytes, bus)?;
-        self.registers.program_counter = (u16::from_le_bytes(addr_bytes) + 1) as usize;
-        Ok(opcode.cycles)
-    }
-
-    fn bit(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let byte = bus.cpu_read_byte(addr)?;
-        self.set_flag_bit_if(1, self.registers.accumulator & byte == 0);
-        self.set_flag_bit_if(6, byte.bit(6));
-        self.set_flag_bit_if(7, byte.bit(7));
-
-        Ok(opcode.cycles)
-    }
-
-    fn cmp(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        self.compare_reg(addr, self.registers.accumulator, opcode, bus)
-    }
-
-    fn cpy(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        self.compare_reg(addr, self.registers.y_reg, opcode, bus)
-    }
-
-    fn cpx(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        self.compare_reg(addr, self.registers.x_reg, opcode, bus)
-    }
-
-    fn compare_reg(
-        &mut self,
-        addr: usize,
-        reg_val: u8,
-        opcode: &Opcode,
-        bus: &mut Bus,
-    ) -> Result<u8, &'static str> {
-        let byte = bus.cpu_read_byte(addr)?;
-        self.set_flag_bit_if(0, reg_val >= byte);
-        self.set_flag_bit_if(1, reg_val == byte);
-        self.set_flag_bit_if(7, reg_val.wrapping_sub(byte).bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn tay(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.y_reg = self.registers.accumulator;
-        self.set_flag_bit_if(1, self.registers.y_reg == 0);
-        self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn tya(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.accumulator = self.registers.y_reg;
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn tax(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.x_reg = self.registers.accumulator;
-        self.set_flag_bit_if(1, self.registers.x_reg == 0);
-        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn txa(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.accumulator = self.registers.x_reg;
-        self.set_flag_bit_if(1, self.registers.accumulator == 0);
-        self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn tsx(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.x_reg = self.registers.stack_ptr as u8;
-        self.set_flag_bit_if(1, self.registers.x_reg == 0);
-        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn txs(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.stack_ptr = self.registers.x_reg as usize;
-        Ok(opcode.cycles)
-    }
-
-    fn iny(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.y_reg = self.registers.y_reg.wrapping_add(1);
-        self.set_flag_bit_if(1, self.registers.y_reg == 0);
-        self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn dey(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.y_reg = self.registers.y_reg.wrapping_sub(1);
-        self.set_flag_bit_if(1, self.registers.y_reg == 0);
-        self.set_flag_bit_if(7, self.registers.y_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn inx(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.x_reg = self.registers.x_reg.wrapping_add(1);
-        self.set_flag_bit_if(1, self.registers.x_reg == 0);
-        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn dex(&mut self, _: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.x_reg = self.registers.x_reg.wrapping_sub(1);
-        self.set_flag_bit_if(1, self.registers.x_reg == 0);
-        self.set_flag_bit_if(7, self.registers.x_reg.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn inc(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let new_byte = bus.cpu_read_byte(addr)?.wrapping_add(1);
-        bus.cpu_write_byte(addr, new_byte)?;
-        self.set_flag_bit_if(1, new_byte == 0);
-        self.set_flag_bit_if(7, new_byte.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn dec(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let new_byte = bus.cpu_read_byte(addr)?.wrapping_sub(1);
-        bus.cpu_write_byte(addr, new_byte)?;
-        self.set_flag_bit_if(1, new_byte == 0);
-        self.set_flag_bit_if(7, new_byte.bit(7));
-        Ok(opcode.cycles)
-    }
-
-    fn sta(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        bus.cpu_write_byte(addr, self.registers.accumulator)?;
-        Ok(opcode.cycles)
-    }
-
-    fn stx(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        bus.cpu_write_byte(addr as usize, self.registers.x_reg)?;
-        Ok(opcode.cycles)
-    }
-
-    fn sty(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        bus.cpu_write_byte(addr as usize, self.registers.y_reg)?;
-        Ok(opcode.cycles)
-    }
-
-    fn ldy(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let byte = bus.cpu_read_byte(addr)?;
-        self.registers.y_reg = byte;
-        self.set_flag_bit_if(1, byte == 0);
-        self.set_flag_bit_if(7, byte.bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn ldx(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let byte = bus.cpu_read_byte(addr)?;
-        self.registers.x_reg = byte;
-        self.set_flag_bit_if(1, byte == 0);
-        self.set_flag_bit_if(7, byte.bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn lda(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        let byte = bus.cpu_read_byte(addr)?;
-        self.registers.accumulator = byte;
-        self.set_flag_bit_if(1, byte == 0);
-        self.set_flag_bit_if(7, byte.bit(7));
-        self.adjust_cycles(addr, opcode, bus)
-    }
-
-    fn lsr(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        match opcode.mode {
-            AddressMode::ACCUMULATOR => {
-                self.set_flag_bit_if(0, self.registers.accumulator.bit(0));
-                self.registers.accumulator = self.registers.accumulator >> 1;
-                self.set_flag_bit_if(1, self.registers.accumulator == 0);
-                self.registers
-                    .status_register
-                    .modify(Status::NEGATIVE::CLEAR);
-            }
-            _ => {
-                let mut byte = bus.cpu_read_byte(addr)?;
-                self.set_flag_bit_if(0, byte.bit(0));
-                byte = byte >> 1;
-                bus.cpu_write_byte(addr, byte)?;
-                self.set_flag_bit_if(1, byte == 0);
-                self.registers
-                    .status_register
-                    .modify(Status::NEGATIVE::CLEAR);
-            }
-        }
-
-        Ok(opcode.cycles)
-    }
-
-    fn asl(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        match opcode.mode {
-            AddressMode::ACCUMULATOR => {
-                self.set_flag_bit_if(0, self.registers.accumulator.bit(7));
-                self.registers.accumulator = self.registers.accumulator << 1;
-                self.set_flag_bit_if(1, self.registers.accumulator == 0);
-                self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-            }
-            _ => {
-                let mut byte = bus.cpu_read_byte(addr)?;
-                self.set_flag_bit_if(0, byte.bit(7));
-                byte = byte << 1;
-                bus.cpu_write_byte(addr, byte)?;
-                self.set_flag_bit_if(1, byte == 0);
-                self.set_flag_bit_if(7, byte.bit(7));
-            }
-        }
-        Ok(opcode.cycles)
-    }
-
-    fn ror(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        match opcode.mode {
-            AddressMode::ACCUMULATOR => {
-                let new_carry = self.registers.accumulator.bit(0);
-                self.registers.accumulator = self.registers.accumulator >> 1;
-                self.registers
-                    .accumulator
-                    .set_bit(7, self.registers.status_register.is_set(Status::CARRY));
-                self.set_flag_bit_if(0, new_carry);
-                self.set_flag_bit_if(1, self.registers.accumulator == 0);
-                self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-            }
-            _ => {
-                let mut byte = bus.cpu_read_byte(addr)?;
-                let new_carry = byte.bit(0);
-                byte = byte >> 1;
-                byte.set_bit(7, self.registers.status_register.is_set(Status::CARRY));
-                bus.cpu_write_byte(addr, byte)?;
-                self.set_flag_bit_if(0, new_carry);
-                self.set_flag_bit_if(1, byte == 0);
-                self.set_flag_bit_if(7, byte.bit(7));
-            }
-        }
-        Ok(opcode.cycles)
-    }
-
-    fn rol(&mut self, addr: usize, opcode: &Opcode, bus: &mut Bus) -> Result<u8, &'static str> {
-        match opcode.mode {
-            AddressMode::ACCUMULATOR => {
-                let new_carry = self.registers.accumulator.bit(7);
-                self.registers.accumulator = self.registers.accumulator << 1;
-                self.registers
-                    .accumulator
-                    .set_bit(0, self.registers.status_register.is_set(Status::CARRY));
-                self.set_flag_bit_if(0, new_carry);
-                self.set_flag_bit_if(1, self.registers.accumulator == 0);
-                self.set_flag_bit_if(7, self.registers.accumulator.bit(7));
-            }
-            _ => {
-                let mut byte = bus.cpu_read_byte(addr)?;
-                let new_carry = byte.bit(7);
-                byte = byte << 1;
-                byte.set_bit(0, self.registers.status_register.is_set(Status::CARRY));
-                bus.cpu_write_byte(addr, byte)?;
-                self.set_flag_bit_if(0, new_carry);
-                self.set_flag_bit_if(1, byte == 0);
-                self.set_flag_bit_if(7, byte.bit(7));
-            }
-        }
-        Ok(opcode.cycles)
-    }
-
-    fn bcc(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, false, opcode.cycles, Status::CARRY)
-    }
-
-    fn bcs(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, true, opcode.cycles, Status::CARRY)
-    }
-
-    fn beq(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, true, opcode.cycles, Status::ZERO)
-    }
-
-    fn bne(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, false, opcode.cycles, Status::ZERO)
-    }
-
-    fn bvs(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, true, opcode.cycles, Status::OVERFLOW)
-    }
-
-    fn bvc(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, false, opcode.cycles, Status::OVERFLOW)
-    }
-
-    fn bpl(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, false, opcode.cycles, Status::NEGATIVE)
-    }
-
-    fn bmi(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.branchif(addr, true, opcode.cycles, Status::NEGATIVE)
-    }
-
-    fn branchif(
-        &mut self,
-        addr: usize,
-        set: bool,
-        mut cycle_count: u8,
-        flag: Field<u8, Register>,
-    ) -> Result<u8, &'static str> {
-        let check = if set {
-            self.registers.status_register.is_set(flag)
-        } else {
-            !self.registers.status_register.is_set(flag)
-        };
-
-        if check {
-            cycle_count += 1;
-            let new_addr = addr;
-
-            if CPU::will_cross_boundary(new_addr, self.registers.program_counter) {
-                cycle_count += 1;
-            }
-
-            self.registers.program_counter = new_addr;
-        }
-
-        Ok(cycle_count)
-    }
-
-    fn jmp(&mut self, addr: usize, opcode: &Opcode, _: &mut Bus) -> Result<u8, &'static str> {
-        self.registers.program_counter = addr as usize;
-        Ok(opcode.cycles)
-    }
-
     // TODO: This is really slow
+    // TODO: Causes issues because it does destructive reads on memory mapped IO, can be fixed when we
+    // refactor the bus
     pub fn write_opcode(&mut self, opcode: &Opcode, bus: &mut Bus) -> Result<(), &'static str> {
-        let mut fmt_string = format!("{:04X}  ", self.current_instruction_addr);
+        let mut fmt_string = format!("{:04X}  ", self.old_register_state.program_counter);
 
         if opcode.num_bytes == 1 {
             fmt_string = format!(
