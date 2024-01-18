@@ -6,8 +6,10 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 use super::{
     controller::Controller,
     mappers::{new_mapper, Mapper, MirrorMode},
-    palette_memory::PaletteMemory,
-    ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
+    ppu::{
+        palette_memory::PaletteMemory,
+        ppu_registers::{PPURegisters, PPUCTRL, PPUSTATUS},
+    },
 };
 
 pub struct Bus {

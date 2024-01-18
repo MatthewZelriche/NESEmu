@@ -1,15 +1,15 @@
+use super::{bus::Bus, screen::FrameBuffer};
 use bitfield::{Bit, BitMut, BitRange, BitRangeMut};
+use ppu_registers::{PPUCTRL, PPUSTATUS};
 use tock_registers::{
     interfaces::{ReadWriteable, Readable},
     register_bitfields,
     registers::InMemoryRegister,
 };
 
-use super::{
-    bus::Bus,
-    ppu_registers::{PPUCTRL, PPUSTATUS},
-    screen::FrameBuffer,
-};
+mod palette;
+pub mod palette_memory; // TODO: Change to private vis after refactoring bus
+pub mod ppu_registers;
 
 // TODO:
 // Max 8 Sprites per line (+ sprite overflow)
