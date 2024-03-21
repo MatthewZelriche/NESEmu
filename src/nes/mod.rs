@@ -42,7 +42,7 @@ impl NES {
             ppu: PPU::new(),
             bus,
             ui: UI::new(),
-            halt: true,
+            halt: false,
             screen: Screen::new(cc.egui_ctx.clone()),
             pending_interrupt: false,
             frame_start: Instant::now(),
