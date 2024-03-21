@@ -14,6 +14,20 @@ Shown above: The homebrew game <a href="https://www.romhacking.net/homebrew/1/">
 * Pause/Play emulation on demand
 * Hex editor allows inspection and modification of system memory at runtime
 
+## Controls
+
+| Action | Key        |
+|--------|------------|
+| A      | Z          |
+| B      | X          |
+| Start  | Enter      |
+| Select | Backspace  |
+| Up     | ArrowUp    |
+| Down   | ArrowDown  |
+| Left   | ArrowLeft  |
+| Right  | ArrowRight |
+| Pause  | P          |
+
 ## Other Media
 
 ![](https://raw.githubusercontent.com/MatthewZelriche/NESEmu/main/img/testrom.png)
