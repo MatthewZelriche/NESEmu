@@ -34,8 +34,8 @@ pub struct NES {
 
 impl NES {
     const FRAME_TIME: f64 = 1.0 / 60.098814;
-    pub fn new(rom_path: &str, cc: &CreationContext) -> Result<Self, Error> {
-        let mut bus = Bus::new(rom_path)?;
+    pub fn new(rom_path: String, cc: &CreationContext) -> Result<Self, Error> {
+        let mut bus = Bus::new(rom_path.as_str())?;
         let cpu = CPU::new(&mut bus).map_err(|_| Error::from(ErrorKind::AddrNotAvailable))?;
         Ok(Self {
             cpu,

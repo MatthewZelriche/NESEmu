@@ -1,11 +1,17 @@
 use eframe::egui::ViewportBuilder;
 use nes::NES;
+use std::env;
 
 mod nes;
 
 fn main() {
-    // TODO: Dehardcode rom path
-    let path = "res/nestest.nes";
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        println!("Missing rom path! Usage: cargo run <path/to/rom>");
+        std::process::exit(-1);
+    }
+
+    let path = args[1].clone();
     let mut native_options = eframe::NativeOptions::default();
     native_options.vsync = false;
     native_options.viewport = ViewportBuilder::default().with_inner_size([1024.0, 768.0]);
